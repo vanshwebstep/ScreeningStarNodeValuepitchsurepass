@@ -4,6 +4,7 @@ const multer = require("multer");
 const ftp = require("basic-ftp");
 const App = require("../models/appModel");
 const axios = require("axios");
+
 // Fetch app information (database query) once
 let cloudImageFTPHost,
   cloudImageFTPUser,
@@ -15,6 +16,7 @@ App.appInfo("backend", (err, appInfo) => {
     console.error("Database error:", err);
     return;
   }
+
   cloudImageFTPHost = appInfo.cloud_ftp_host;
   cloudImageFTPUser = appInfo.cloud_ftp_user;
   cloudImageFTPPassword = appInfo.cloud_ftp_password;
@@ -88,12 +90,15 @@ const upload = multer({
 });
 // Function to save a single image and upload it to FTP
 const saveImage = async (file, targetDir, fileNameSlug = '') => {
+  console.log("Saving image with fileNameSlug:", fileNameSlug);
+  console.log("File details:", file);
+  console.log("Target directory:", targetDir);
   return new Promise((resolve, reject) => {
     if (file) {
       const originalPath = path.join("uploads", file.filename); // Original file path
-
-      const newFileName = fileNameSlug
-        ? `${fileNameSlug}-${file.filename}`
+console.log("Original file path:", originalPath);
+      const newFileName = fileNameSlug 
+        ? `${fileNameSlug}-${file.filename}` 
         : file.filename;
 
       const newPath = path.join(targetDir, newFileName); // New file path

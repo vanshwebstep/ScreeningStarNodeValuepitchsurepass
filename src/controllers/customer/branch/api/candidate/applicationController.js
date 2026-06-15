@@ -394,4 +394,124 @@ exports.create = (req, res) => {
       }
     );
   });
+  
 };
+exports.fetch_bgv_pdf = async (req, res) => {
+    const { candidate_application_id, branch_id, customer_id } = req.query;
+
+    // Validation
+    const missingFields = [];
+    if (!candidate_application_id || candidate_application_id === "undefined")
+      missingFields.push("Candidate Application ID");
+    if (!branch_id || branch_id === "undefined")
+      missingFields.push("Branch ID");
+    if (!customer_id || customer_id === "undefined")
+      missingFields.push("Customer ID");
+
+    if (missingFields.length > 0) {
+      return res.status(400).json({
+        status: false,
+        message: `Missing required fields: ${missingFields.join(", ")}`,
+      });
+    }
+
+    try {
+      // Step 1: Application exist karti hai ya nahi
+      Candidate.isApplicationExist(
+        candidate_application_id,
+        branch_id,
+        customer_id,
+        async (err, appResult) => {
+          if (err) {
+            return res.status(500).json({ status: false, message: err.message });
+          }
+
+          if (!appResult || !appResult.status) {
+            return res.status(404).json({
+              status: false,
+              message: "Application does not exist.",
+            });
+          }
+
+          // Step 2: Customer info fetch karo (client_unique_id chahiye path ke liye)
+          Customer.getCustomerById(customer_id, async (err, currentCustomer) => {
+            if (err || !currentCustomer) {
+              return res.status(404).json({
+                status: false,
+                message: "Customer not found.",
+              });
+            }
+
+            // Step 3: App info se imageHost lo
+            AppModel.appInfo("backend", async (err, appInfo) => {
+              if (err) {
+                return res.status(500).json({
+                  status: false,
+                  message: "Failed to fetch app configuration.",
+                });
+              }
+
+              const imageHost =
+                (appInfo && appInfo.cloud_host) || "www.example.in";
+
+              const client_unique_id = currentCustomer.client_unique_id;
+              const name = appResult.data.name || "applicant";
+
+              const today = new Date();
+              const formattedDate = `${today.getFullYear()}-${String(
+                today.getMonth() + 1
+              ).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
+
+              const pdfFileName = `BGV Form-${name}_${formattedDate}.pdf`
+                .replace(/\s+/g, "-")
+                .toLowerCase();
+
+              const targetDirectory = `uploads/customers/${client_unique_id}/candidate-applications/CD-${client_unique_id}-${candidate_application_id}/background-form-reports`;
+
+              try {
+                // Step 4: PDF regenerate karo (ya existing serve karo)
+                const pdfPath = await candidateFormPDF(
+                  candidate_application_id,
+                  branch_id,
+                  customer_id,
+                  pdfFileName,
+                  targetDirectory
+                );
+
+                if (!pdfPath) {
+                  return res.status(500).json({
+                    status: false,
+                    message: "Failed to generate BGV form PDF.",
+                  });
+                }
+
+                const pdfUrl = `${imageHost}/${pdfPath}`;
+
+                return res.status(200).json({
+                  status: true,
+                  message: "BGV form PDF fetched successfully.",
+                  data: {
+                    candidate_application_id,
+                    applicant_name: name,
+                    bgv_form_pdf: pdfUrl,
+                  },
+                });
+              } catch (pdfError) {
+                console.error("PDF generation error:", pdfError);
+                return res.status(500).json({
+                  status: false,
+                  message: "Error generating BGV form PDF.",
+                });
+              }
+            });
+          });
+        }
+      );
+    } catch (error) {
+      console.error("Unexpected error:", error);
+      return res.status(500).json({
+        status: false,
+        message: "Something went wrong.",
+      });
+    }
+  };

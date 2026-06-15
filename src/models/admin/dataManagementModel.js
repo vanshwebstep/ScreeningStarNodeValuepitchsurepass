@@ -304,240 +304,213 @@ const Customer = {
 
 
   applicationListByBranch: async (filter_status, branch_id, status, callback) => {
-    console.log("Initializing database connection...");
 
-
-    console.log("Database connection established successfully.");
-
-    // Base SQL query with JOINs
-    let sql = `
-           SELECT 
-                ca.*, 
-                ca.id AS main_id,
-                cmt.first_insufficiency_marks,
-                cmt.first_insuff_date,
-                cmt.first_insuff_reopened_date,
-                cmt.second_insufficiency_marks,
-                cmt.second_insuff_date,
-                cmt.second_insuff_reopened_date,
-                cmt.third_insufficiency_marks,
-                cmt.third_insuff_date,
-                cmt.third_insuff_reopened_date,
-                cmt.overall_status,
-                cmt.initiation_date,
-                cmt.is_verify,
-                cmt.report_date,
-                cmt.report_status,
-                cmt.report_type,
-                cmt.qc_done_by,
-                qc_admin.name AS qc_done_by_name,
-                cmt.delay_reason,
-                cmt.report_generate_by,
-                report_admin.name AS report_generated_by_name,
-                cmt.case_upload
-            FROM 
-                \`client_applications\` ca
-            LEFT JOIN 
-                \`cmt_applications\` cmt 
-            ON 
-                ca.id = cmt.client_application_id
-            LEFT JOIN 
-                \`admins\` AS qc_admin 
-            ON 
-                qc_admin.id = cmt.qc_done_by
-            LEFT JOIN 
-                \`admins\` AS report_admin 
-            ON 
-                report_admin.id = cmt.report_generate_by
-            WHERE 
-                ca.\`branch_id\` = ? AND ca.\`is_data_qc\` = 0 AND ca.is_deleted != 1`;
-
-    console.log("Initial SQL Query Constructed.");
-
-    const params = [branch_id]; // Start with branch_id
-    console.log("Query Parameters (Initial):", params);
-
-    // Check if filter_status is provided
-    if (filter_status && filter_status.trim() !== "") {
-      sql += ` AND ca.\`status\` = ?`; // Add filter for filter_status
-      params.push(filter_status);
-      console.log("Added filter_status condition:", filter_status);
-    }
-
-    // Check if status is provided and add the corresponding condition
-    if (typeof status === "string" && status.trim() !== "") {
-      sql += ` AND ca.\`status\` = ?`; // Add filter for status
-      params.push(status);
-      console.log("Added status condition:", status);
-    }
-
-    sql += ` ORDER BY ca.\`created_at\` DESC;`;
-    console.log("Final SQL Query:", sql);
-    console.log("Final Query Parameters:", params);
-
+  // ─── Safe JSON parse helper ───────────────────────────────────────────────
+  const safeJsonParse = (str, fallback = null) => {
+    if (!str || typeof str !== "string") return fallback;
     try {
-      const results = await new Promise(async (resolve, reject) => {
-        const rows = await sequelize.query(sql, {
-          replacements: params, // Positional replacements using ?
-          type: QueryTypes.SELECT,
-        });
-        resolve(rows);
+      return JSON.parse(str);
+    } catch (e) {
+      console.warn("safeJsonParse: invalid JSON, skipping →", e.message);
+      return fallback;
+    }
+  };
 
-      });
-      const cmtPromises = results.map(async (clientApp) => {
+  // ─── Base SQL ─────────────────────────────────────────────────────────────
+  let sql = `
+    SELECT 
+      ca.*, 
+      ca.id AS main_id,
+      cmt.first_insufficiency_marks,
+      cmt.first_insuff_date,
+      cmt.first_insuff_reopened_date,
+      cmt.second_insufficiency_marks,
+      cmt.second_insuff_date,
+      cmt.second_insuff_reopened_date,
+      cmt.third_insufficiency_marks,
+      cmt.third_insuff_date,
+      cmt.third_insuff_reopened_date,
+      cmt.overall_status,
+      cmt.initiation_date,
+      cmt.is_verify,
+      cmt.report_date,
+      cmt.report_status,
+      cmt.report_type,
+      cmt.qc_done_by,
+      qc_admin.name  AS qc_done_by_name,
+      cmt.delay_reason,
+      cmt.report_generate_by,
+      report_admin.name AS report_generated_by_name,
+      cmt.case_upload
+    FROM  \`client_applications\` ca
+    LEFT JOIN \`cmt_applications\`  cmt       ON ca.id = cmt.client_application_id
+    LEFT JOIN \`admins\` AS qc_admin           ON qc_admin.id  = cmt.qc_done_by
+    LEFT JOIN \`admins\` AS report_admin       ON report_admin.id = cmt.report_generate_by
+    WHERE ca.\`branch_id\` = ?
+      AND ca.\`is_data_qc\` = 0
+      AND ca.is_deleted != 1`;
+
+  const params = [branch_id];
+
+  if (filter_status && filter_status.trim() !== "") {
+    sql += ` AND ca.\`status\` = ?`;
+    params.push(filter_status);
+  }
+
+  if (typeof status === "string" && status.trim() !== "") {
+    sql += ` AND ca.\`status\` = ?`;
+    params.push(status);
+  }
+
+  sql += ` ORDER BY ca.\`created_at\` DESC;`;
+
+  try {
+    // ─── Main query ───────────────────────────────────────────────────────
+    const results = await sequelize.query(sql, {
+      replacements: params,
+      type: QueryTypes.SELECT,
+    });
+
+    // ─── Per-application enrichment ───────────────────────────────────────
+    await Promise.all(
+      results.map(async (clientApp) => {
         const servicesResult = { annexure_attachments: {} };
-        const servicesIds = clientApp.services?.split(",") || [];
+        const servicesIds = clientApp.services
+          ? clientApp.services.split(",").map((s) => s.trim()).filter(Boolean)
+          : [];
 
+        // ── Service titles ─────────────────────────────────────────────
         if (servicesIds.length) {
-          const servicesTitles = await new Promise(async (resolve, reject) => {
-            const servicesQuery =
-              "SELECT title FROM `services` WHERE id IN (?)";
-
-            const rows = await sequelize.query(servicesQuery, {
-              replacements: servicesIds, // Positional replacements using ?
-              type: QueryTypes.SELECT,
-            });
-            resolve(rows.map((row) => row.title));
-          });
-
-          clientApp.serviceNames = servicesTitles;
+          const rows = await sequelize.query(
+            "SELECT title FROM `services` WHERE id IN (?)",
+            { replacements: [servicesIds], type: QueryTypes.SELECT }
+          );
+          clientApp.serviceNames = rows.map((r) => r.title);
+        } else {
+          clientApp.serviceNames = [];
         }
 
-        const dbTableFileInputs = {};
+        // ── Collect file-input columns per db_table ────────────────────
+        const dbTableFileInputs  = {};
         const dbTableColumnLabel = {};
         const dbTableWithHeadings = {};
 
         await Promise.all(
-          servicesIds.map(async (service) => {
-            const reportFormQuery =
-              "SELECT `json` FROM `report_forms` WHERE `service_id` = ?";
-            const result = await new Promise(async (resolve, reject) => {
-              const rows = await sequelize.query(reportFormQuery, {
-                replacements: [service], // Positional replacements using ?
-                type: QueryTypes.SELECT,
+          servicesIds.map(async (serviceId) => {
+            // Guard: serviceId must be a usable value
+            if (!serviceId) return;
+
+            const rows = await sequelize.query(
+              "SELECT `json` FROM `report_forms` WHERE `service_id` = ?",
+              { replacements: [serviceId], type: QueryTypes.SELECT }
+            );
+
+            // Guard: no report_form row for this service
+            if (!rows.length || !rows[0].json) return;
+
+            // Guard: invalid JSON → skip this service gracefully
+            const jsonData = safeJsonParse(rows[0].json);
+            if (!jsonData) return;
+
+            const dbTable = jsonData.db_table;
+            const heading = jsonData.heading;
+
+            // Guard: db_table must exist in JSON
+            if (!dbTable) return;
+
+            if (heading) dbTableWithHeadings[dbTable] = heading;
+            if (!dbTableFileInputs[dbTable]) dbTableFileInputs[dbTable] = [];
+
+            // Guard: rows array must exist
+            if (!Array.isArray(jsonData.rows)) return;
+
+            jsonData.rows.forEach((row) => {
+              // Guard: row must have a label and inputs array
+              if (!row || !row.label || !Array.isArray(row.inputs)) return;
+
+              const inputLabel = row.label;
+              row.inputs.forEach((input) => {
+                // Guard: input must be a file type with a name
+                if (!input || input.type !== "file" || !input.name) return;
+
+                const inputName = input.name.replace(/\s+/g, "");
+                dbTableFileInputs[dbTable].push(inputName);
+                dbTableColumnLabel[inputName] = inputLabel;
               });
-
-              resolve(rows);
-
             });
-
-            if (result.length) {
-              const jsonData = JSON.parse(result[0].json);
-              const dbTable = jsonData.db_table;
-              const heading = jsonData.heading;
-
-              if (dbTable && heading) dbTableWithHeadings[dbTable] = heading;
-
-              if (!dbTableFileInputs[dbTable])
-                dbTableFileInputs[dbTable] = [];
-
-              jsonData.rows.forEach((row) => {
-                const inputLabel = row.label;
-                row.inputs.forEach((input) => {
-                  if (input.type === "file") {
-                    const inputName = input.name.replace(/\s+/g, "");
-                    dbTableFileInputs[dbTable].push(inputName);
-                    dbTableColumnLabel[inputName] = inputLabel;
-                  }
-                });
-              });
-            }
           })
         );
 
+        // ── Fetch file attachment values from each db_table ────────────
         await Promise.all(
           Object.entries(dbTableFileInputs).map(
             async ([dbTable, fileInputNames]) => {
+              // Guard: nothing to query
               if (!fileInputNames.length) return;
 
-              // Check if table exists using raw query
-              const tableCheckQuery = `
-                                      SELECT COUNT(*) AS count 
-                                      FROM information_schema.tables 
-                                      WHERE table_schema = DATABASE() 
-                                        AND table_name = :dbTable
-                                    `;
-
-              const [tableCheckResult] = await sequelize.query(tableCheckQuery, {
-                replacements: { dbTable },
-                type: QueryTypes.SELECT,
-              });
-
-              if (tableCheckResult.count === 0) {
+              // Guard: table must actually exist in DB
+              const [tableCheck] = await sequelize.query(
+                `SELECT COUNT(*) AS count
+                 FROM information_schema.tables
+                 WHERE table_schema = DATABASE() AND table_name = :dbTable`,
+                { replacements: { dbTable }, type: QueryTypes.SELECT }
+              );
+              if (!tableCheck || tableCheck.count === 0) {
                 console.warn(`Table '${dbTable}' does not exist. Skipping.`);
                 return;
               }
 
-              const existingColumns = await new Promise(async (resolve, reject) => {
-                const describeQuery = `DESCRIBE ${dbTable}`;
-                const rows = await sequelize.query(describeQuery, {
-                  type: QueryTypes.SELECT,
-                });
-
-                resolve(rows.map((col) => col.Field));
-
-              });
-
+              // Guard: only query columns that actually exist in the table
+              const describedCols = await sequelize.query(
+                `DESCRIBE ${dbTable}`,
+                { type: QueryTypes.SELECT }
+              );
+              const existingColumns = describedCols.map((c) => c.Field);
               const validColumns = fileInputNames.filter((col) =>
                 existingColumns.includes(col)
               );
 
+              // Guard: none of our target columns exist
               if (!validColumns.length) return;
 
-              const selectQuery = `SELECT ${validColumns.join(
-                ", "
-              )} FROM ${dbTable} WHERE client_application_id = ?`;
-              const rows = await new Promise(async (resolve, reject) => {
-                const rows = await sequelize.query(selectQuery, {
-                  replacements: [clientApp.main_id], // Positional replacements using ?
-                  type: QueryTypes.SELECT,
-                });
-                resolve(rows);
-              });
+              const rows = await sequelize.query(
+                `SELECT ${validColumns.join(", ")} FROM ${dbTable} WHERE client_application_id = ?`,
+                { replacements: [clientApp.main_id], type: QueryTypes.SELECT }
+              );
+
+              // Guard: no rows returned
+              if (!rows.length) return;
 
               const updatedRows = rows
                 .map((row) => {
                   const updatedRow = {};
-
                   for (const [key, value] of Object.entries(row)) {
-                    if (
-                      value !== null &&
-                      value !== undefined &&
-                      value !== ""
-                    ) {
+                    if (value !== null && value !== undefined && value !== "") {
                       updatedRow[dbTableColumnLabel[key] || key] = value;
                     }
                   }
-
-                  // Return updatedRow only if something was added
-                  if (Object.keys(updatedRow).length > 0) {
-                    return updatedRow;
-                  }
-                  return null;
+                  return Object.keys(updatedRow).length > 0 ? updatedRow : null;
                 })
-                .filter((row) => row !== null);
+                .filter(Boolean);
 
               if (updatedRows.length > 0) {
-                servicesResult.annexure_attachments[
-                  dbTableWithHeadings[dbTable]
-                ] = updatedRows;
+                const headingKey = dbTableWithHeadings[dbTable] || dbTable;
+                servicesResult.annexure_attachments[headingKey] = updatedRows;
               }
             }
           )
         );
 
         clientApp.service_data = servicesResult;
-      });
+      })
+    );
 
-      await Promise.all(cmtPromises);
-      callback(null, results);
-    } catch (error) {
-      console.error("Error processing data:", error);
-      callback(error, null);
-    }
-
-
-  },
+    callback(null, results);
+  } catch (error) {
+    console.error("Error processing applicationListByBranch:", error);
+    callback(error, null);
+  }
+},
 
   applicationByID: async (application_id, branch_id, callback) => {
     // Start a connection

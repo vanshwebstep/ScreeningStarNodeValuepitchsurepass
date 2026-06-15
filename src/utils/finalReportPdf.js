@@ -1186,20 +1186,20 @@ module.exports = {
                                                         };
                                                         // Calculate the vertical center of the rectangle (center of the rectangle)
                                                         const verticalCenterY = newYPosition + (rectHeight / 2);
-                                                    const getPdfColor = (color) => {
-            const map = {
-                red: [255, 0, 0],
-                green: [0, 128, 0],
-                yellow: [255, 193, 7],
-                orange: [255, 165, 0],
-                blue: [0, 0, 255],
-                pink: [255, 105, 180],
-                gray: [128, 128, 128],
-                black: [0, 0, 0],
-            };
+                                                        const getPdfColor = (color) => {
+                                                            const map = {
+                                                                red: [255, 0, 0],
+                                                                green: [0, 128, 0],
+                                                                yellow: [255, 193, 7],
+                                                                orange: [255, 165, 0],
+                                                                blue: [0, 0, 255],
+                                                                pink: [255, 105, 180],
+                                                                gray: [128, 128, 128],
+                                                                black: [0, 0, 0],
+                                                            };
 
-            return map[color] || [0, 0, 0];
-        };
+                                                            return map[color] || [0, 0, 0];
+                                                        };
                                                         // Calculate the horizontal center of the page (center of the page)
                                                         const horizontalCenterX = pageWidth / 2;
 
@@ -1429,82 +1429,82 @@ module.exports = {
                                                                                 fontStyle: 'normal',
                                                                             },
                                                                         },
-                                                                      {
-                            content: (() => {
-                                const serviceType = service?.service_type || "";
-                                const serviceTypes = serviceType.split(',').map(s => s.trim().toLowerCase());
+                                                                        {
+                                                                            content: (() => {
+                                                                                const serviceType = service?.service_type || "";
+                                                                                const serviceTypes = serviceType.split(',').map(s => s.trim().toLowerCase());
 
-                                // ================= VALUEPITCH =================
-                                if (serviceTypes.includes("valuepitch")) {
-                                    const vpStatus = service?.valuePitchStatus;
-                                    const vpReport = service?.valuePitchReport;
+                                                                                // ================= VALUEPITCH =================
+                                                                                if (serviceTypes.includes("valuepitch")) {
+                                                                                    const vpStatus = service?.valuePitchStatus;
+                                                                                    const vpReport = service?.valuePitchReport;
 
-                                    // ✅ Report Ready
-                                    if (
-                                        vpStatus?.statusCode === 201 &&
-                                        vpStatus?.statusMsg?.toLowerCase().includes("ready") &&
-                                        vpReport?.report
-                                    ) {
-                                        return vpReport.report.toUpperCase(); // GREEN / RED etc.
-                                    }
+                                                                                    // ✅ Report Ready
+                                                                                    if (
+                                                                                        vpStatus?.statusCode === 201 &&
+                                                                                        vpStatus?.statusMsg?.toLowerCase().includes("ready") &&
+                                                                                        vpReport?.report
+                                                                                    ) {
+                                                                                        return vpReport.report.toUpperCase(); // GREEN / RED etc.
+                                                                                    }
 
-                                    // ❌ Not Ready
-                                    return "MANAGED BY VALUEPITCH API";
-                                }
+                                                                                    // ❌ Not Ready
+                                                                                    return "MANAGED BY VALUEPITCH API";
+                                                                                }
 
-                                // ================= SUREPASS =================
-                                    if (serviceTypes.includes("surepass")) {
-                                        const sp = getSurepassStatus(service);
-                                        return sp.label;
-                                    }
+                                                                                // ================= SUREPASS =================
+                                                                                if (serviceTypes.includes("surepass")) {
+                                                                                    const sp = getSurepassStatus(service);
+                                                                                    return sp.label;
+                                                                                }
 
-                                // ================= DEFAULT =================
-                                return formatStatus(displayText).toUpperCase();
-                            })(),
-                            styles: {
-                                fontStyle: 'bold',
-                                font: 'TimesNewRomanBold',
-                                textColor: (() => {
-                                    const serviceType = service?.service_type || "";
-                                    const serviceTypes = serviceType.split(',').map(s => s.trim().toLowerCase());
+                                                                                // ================= DEFAULT =================
+                                                                                return formatStatus(displayText).toUpperCase();
+                                                                            })(),
+                                                                            styles: {
+                                                                                fontStyle: 'bold',
+                                                                                font: 'TimesNewRomanBold',
+                                                                                textColor: (() => {
+                                                                                    const serviceType = service?.service_type || "";
+                                                                                    const serviceTypes = serviceType.split(',').map(s => s.trim().toLowerCase());
 
-                                    // ================= VALUEPITCH =================
-                                    if (serviceTypes.includes("valuepitch")) {
-                                        const vpStatus = service?.valuePitchStatus;
-                                        const vpReport = service?.valuePitchReport;
+                                                                                    // ================= VALUEPITCH =================
+                                                                                    if (serviceTypes.includes("valuepitch")) {
+                                                                                        const vpStatus = service?.valuePitchStatus;
+                                                                                        const vpReport = service?.valuePitchReport;
 
-                                        if (
-                                            vpStatus?.statusCode === 201 &&
-                                            vpStatus?.statusMsg?.toLowerCase().includes("ready") &&
-                                            vpReport?.report
-                                        ) {
-                                            const color = vpReport.report.toLowerCase();
+                                                                                        if (
+                                                                                            vpStatus?.statusCode === 201 &&
+                                                                                            vpStatus?.statusMsg?.toLowerCase().includes("ready") &&
+                                                                                            vpReport?.report
+                                                                                        ) {
+                                                                                            const color = vpReport.report.toLowerCase();
 
-                                            const colorMapping = {
-                                                green: 'green',
-                                                red: 'red',
-                                                yellow: 'yellow',
-                                                orange: 'orange',
-                                                pink: 'pink',
-                                                blue: 'blue',
-                                            };
+                                                                                            const colorMapping = {
+                                                                                                green: 'green',
+                                                                                                red: 'red',
+                                                                                                yellow: 'yellow',
+                                                                                                orange: 'orange',
+                                                                                                pink: 'pink',
+                                                                                                blue: 'blue',
+                                                                                            };
 
-                                            return colorMapping[color] || 'black';
-                                        }
+                                                                                            return colorMapping[color] || 'black';
+                                                                                        }
 
-                                        return 'black';
-                                    }
+                                                                                        return 'black';
+                                                                                    }
 
-                                    // ================= SUREPASS =================
-                                    if (serviceTypes.includes("surepass")) {
-                                        const sp = getSurepassStatus(service);
-                                        return getPdfColor(sp.color); // ✅ RGB color
-                                    }
+                                                                                    // ================= SUREPASS =================
+                                                                                    if (serviceTypes.includes("surepass")) {
+                                                                                        const sp = getSurepassStatus(service);
+                                                                                        return getPdfColor(sp.color); // ✅ RGB color
+                                                                                    }
 
-                                    // ================= DEFAULT =================
-                                    return textColorr;
-                                })(),
-                            },
+                                                                                    // ================= DEFAULT =================
+                                                                                    return textColorr;
+                                                                                })(),
+                                                                            },
                                                                         },
                                                                     ];
                                                                 })
@@ -1658,100 +1658,100 @@ module.exports = {
                                                                     }
 
                                                                     // ================= SUREPASS =================
-                                                                     // ================= SUREPASS =================
-                    else if (serviceTypes.includes("surepass")) {
-                        const sp = service?.screeningstar_response;
+                                                                    // ================= SUREPASS =================
+                                                                    else if (serviceTypes.includes("surepass")) {
+                                                                        const sp = service?.screeningstar_response;
 
-                        if (!sp || !sp.is_prefilled) {
-                            tableData = [
-                                ["Status", "Managed by Surepass API"]
-                            ];
-                        } else {
-                            const res = sp.response_json || {};
-                            const req = sp.request_json || {};
+                                                                        if (!sp || !sp.is_prefilled) {
+                                                                            tableData = [
+                                                                                ["Status", "Managed by Surepass API"]
+                                                                            ];
+                                                                        } else {
+                                                                            const res = sp.response_json || {};
+                                                                            const req = sp.request_json || {};
 
-                            // 🔥 STATUS
-                            const getStatus = () => {
-                                if (res?.success === true || res?.status_code === 200) return "SUCCESS";
-                                if (res?.status_code >= 500) return "SERVER ERROR";
-                                if (res?.errors || res?.success === false) return "FAILED";
-                                return "PENDING";
-                            };
+                                                                            // 🔥 STATUS
+                                                                            const getStatus = () => {
+                                                                                if (res?.success === true || res?.status_code === 200) return "SUCCESS";
+                                                                                if (res?.status_code >= 500) return "SERVER ERROR";
+                                                                                if (res?.errors || res?.success === false) return "FAILED";
+                                                                                return "PENDING";
+                                                                            };
 
-                            const formatKey = (key) =>
-                                key?.replace(/_/g, " ")
-                                    ?.replace(/\b\w/g, c => c.toUpperCase());
+                                                                            const formatKey = (key) =>
+                                                                                key?.replace(/_/g, " ")
+                                                                                    ?.replace(/\b\w/g, c => c.toUpperCase());
 
-                            const cleanValue = (value) => {
-                                if (value === null || value === undefined) return "N/A";
-                                if (typeof value === "boolean") return value ? "Yes" : "No";
-                                return value.toString();
-                            };
+                                                                            const cleanValue = (value) => {
+                                                                                if (value === null || value === undefined) return "N/A";
+                                                                                if (typeof value === "boolean") return value ? "Yes" : "No";
+                                                                                return value.toString();
+                                                                            };
 
-                            const cleanText = (text) => {
-                                return String(text)
-                                    .replace(/[^\x00-\x7F]/g, "")
-                                    .replace(/\s+/g, " ")
-                                    .trim();
-                            };
+                                                                            const cleanText = (text) => {
+                                                                                return String(text)
+                                                                                    .replace(/[^\x00-\x7F]/g, "")
+                                                                                    .replace(/\s+/g, " ")
+                                                                                    .trim();
+                                                                            };
 
-                            // 🔥 RECURSIVE FUNCTION
-                            const buildRows = (obj) => {
-                                let rows = [];
+                                                                            // 🔥 RECURSIVE FUNCTION
+                                                                            const buildRows = (obj) => {
+                                                                                let rows = [];
 
-                                Object.entries(obj).forEach(([key, value]) => {
-                                    if (typeof value === "object" && value !== null && !Array.isArray(value)) {
-                                        // ✅ FIX: section header → only ONE column
-                                        rows.push([formatKey(key)]);
-                                        rows = rows.concat(buildRows(value));
-                                    }
-                                    else if (Array.isArray(value)) {
-                                        value.forEach((item, idx) => {
-                                            if (typeof item === "object") {
-                                                rows = rows.concat(buildRows(item));
-                                            } else {
-                                                rows.push([`${formatKey(key)} ${idx + 1}`, cleanValue(item)]);
-                                            }
-                                        });
-                                    }
-                                    else {
-                                        rows.push([cleanText(formatKey(key)), cleanValue(value)]);
-                                    }
-                                });
+                                                                                Object.entries(obj).forEach(([key, value]) => {
+                                                                                    if (typeof value === "object" && value !== null && !Array.isArray(value)) {
+                                                                                        // ✅ FIX: section header → only ONE column
+                                                                                        rows.push([formatKey(key)]);
+                                                                                        rows = rows.concat(buildRows(value));
+                                                                                    }
+                                                                                    else if (Array.isArray(value)) {
+                                                                                        value.forEach((item, idx) => {
+                                                                                            if (typeof item === "object") {
+                                                                                                rows = rows.concat(buildRows(item));
+                                                                                            } else {
+                                                                                                rows.push([`${formatKey(key)} ${idx + 1}`, cleanValue(item)]);
+                                                                                            }
+                                                                                        });
+                                                                                    }
+                                                                                    else {
+                                                                                        rows.push([cleanText(formatKey(key)), cleanValue(value)]);
+                                                                                    }
+                                                                                });
 
-                                return rows;
-                            };
+                                                                                return rows;
+                                                                            };
 
-                            // ================= BUILD TABLE =================
-                            tableData = [
-                                ["Status", getStatus()],
-                            ];
+                                                                            // ================= BUILD TABLE =================
+                                                                            tableData = [
+                                                                                ["Status", getStatus()],
+                                                                            ];
 
-                            if (res?.message) {
-                                tableData.push(["Message", res.message]);
-                            }
+                                                                            if (res?.message) {
+                                                                                tableData.push(["Message", res.message]);
+                                                                            }
 
-                            if (res?.message_code) {
-                                tableData.push(["Code", formatKey(res.message_code)]);
-                            }
+                                                                            if (res?.message_code) {
+                                                                                tableData.push(["Code", formatKey(res.message_code)]);
+                                                                            }
 
-                            // 🔥 REQUEST DATA
-                            tableData.push(["Request Data"]); // ✅ FIXED
-                            tableData = tableData.concat(buildRows(req));
+                                                                            // 🔥 REQUEST DATA
+                                                                            tableData.push(["Request Data"]); // ✅ FIXED
+                                                                            tableData = tableData.concat(buildRows(req));
 
-                            // 🔥 RESPONSE DATA
-                            if (res && Object.keys(res).length) {
-                                tableData.push(["Response Data"]); // ✅ FIXED
-                                tableData = tableData.concat(buildRows(res));
-                            }
+                                                                            // 🔥 RESPONSE DATA
+                                                                            if (res && Object.keys(res).length) {
+                                                                                tableData.push(["Response Data"]); // ✅ FIXED
+                                                                                tableData = tableData.concat(buildRows(res));
+                                                                            }
 
-                            // ❌ ERRORS
-                            if (res?.errors) {
-                                tableData.push(["Errors"]); // ✅ FIXED
-                                tableData = tableData.concat(buildRows(res.errors));
-                            }
-                        }
-                    }
+                                                                            // ❌ ERRORS
+                                                                            if (res?.errors) {
+                                                                                tableData.push(["Errors"]); // ✅ FIXED
+                                                                                tableData = tableData.concat(buildRows(res.errors));
+                                                                            }
+                                                                        }
+                                                                    }
 
                                                                     // ================= DEFAULT =================
                                                                     else {
@@ -1885,6 +1885,15 @@ module.exports = {
 
                                                                                     if (isTwoColumnBody) {
                                                                                         // Use only 2 columns in body
+                                                                                        if (row.length === 1) {
+                                                                                            return [
+                                                                                                {
+                                                                                                    content: changeLabel(row[0], generate_report_type),
+                                                                                                    colSpan: 2,
+                                                                                                    styles: { halign: "center", fontStyle: "bold" }
+                                                                                                }
+                                                                                            ];
+                                                                                        }
                                                                                         return [
                                                                                             { content: changeLabel(row[0], generate_report_type), styles: { halign: "left", fontStyle: "bold" } },
                                                                                             {
@@ -1894,6 +1903,15 @@ module.exports = {
                                                                                         ];
                                                                                     } else {
                                                                                         // Normal 3-column body
+                                                                                        if (row.length === 1) {
+                                                                                            return [
+                                                                                                {
+                                                                                                    content: changeLabel(row[0], generate_report_type),
+                                                                                                    colSpan: 3,
+                                                                                                    styles: { halign: "center", fontStyle: "bold" }
+                                                                                                }
+                                                                                            ];
+                                                                                        }
                                                                                         return row.length === 2
                                                                                             ? [
                                                                                                 { content: changeLabel(row[0], generate_report_type), styles: { halign: "left", fontStyle: "bold" } },

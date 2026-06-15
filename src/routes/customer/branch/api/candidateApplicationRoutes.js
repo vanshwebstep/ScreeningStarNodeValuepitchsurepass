@@ -8,5 +8,6 @@ app.use(cors());
 
 // Basic routes
 router.post("/create", apiCandidateController.create);
+router.get("/fetch_bgv_pdf", apiCandidateController.fetch_bgv_pdf);
 
 module.exports = router;

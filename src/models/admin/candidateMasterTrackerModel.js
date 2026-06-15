@@ -1,10 +1,58 @@
 const crypto = require("crypto");
 const { sequelize } = require("../../config/db");
 const { QueryTypes } = require("sequelize");
+const AppModel = require("../appModel");
 
 // Function to hash the password using MD5
 const hashPassword = (password) =>
   crypto.createHash("md5").update(password).digest("hex");
+const getBackendImageHost = () =>
+  new Promise((resolve) => {
+    AppModel.appInfo("backend", (err, appInfo) => {
+      if (err) {
+        console.error("Error fetching backend app info:", err);
+      }
+
+      resolve((appInfo && appInfo.cloud_host) || "www.example.in");
+    });
+  });
+
+const formatDateForPdfName = (value) => {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return null;
+  }
+
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(
+    2,
+    "0"
+  )}-${String(date.getDate()).padStart(2, "0")}`;
+};
+
+const normalizeHost = (host) => String(host || "").replace(/\/+$/, "");
+
+const buildBgvFormPdfUrl = (candidateApp, imageHost) => {
+  if (Number(candidateApp.cef_submitted) !== 1) {
+    return null;
+  }
+
+  const generatedDate = formatDateForPdfName(
+    candidateApp.bgv_form_pdf_generated_at || candidateApp.cef_filled_date
+  );
+
+  if (!generatedDate || !candidateApp.client_unique_id || !candidateApp.main_id) {
+    return null;
+  }
+
+  const name = candidateApp.name || "applicant";
+  const pdfFileName = `BGV Form-${name}_${generatedDate}.pdf`
+    .replace(/\s+/g, "-")
+    .toLowerCase();
+
+  const pdfPath = `uploads/customers/${candidateApp.client_unique_id}/candidate-applications/CD-${candidateApp.client_unique_id}-${candidateApp.main_id}/background-form-reports/${pdfFileName}`;
+
+  return `${normalizeHost(imageHost)}/${pdfPath}`;
+};
 
 const Customer = {
   list: async (filter_status, callback) => {
@@ -290,6 +338,11 @@ const Customer = {
                       ELSE NULL
                   END AS cef_filled_date,
                   cef.created_at,
+                    cef.updated_at AS cef_updated_at,
+                  CASE 
+                      WHEN cef.is_submitted = '1' OR cef.is_submitted = 1 THEN COALESCE(cef.updated_at, cef.created_at)
+                      ELSE NULL
+                  END AS bgv_form_pdf_generated_at,
                   CASE 
                       WHEN cef.is_submitted = '1' OR cef.is_submitted = 1 THEN cef.id
                       ELSE NULL
@@ -363,11 +416,14 @@ const Customer = {
 
       const davResults = await sequelize.query(davSql, { type: QueryTypes.SELECT });
       const digitalAddressID = davResults.length > 0 ? parseInt(davResults[0].id, 10) : null;
+      const imageHost = await getBackendImageHost();
 
       // Process each candidate application
       await Promise.all(
         results.map(async (candidateApp) => {
           candidateApp.applications_id = `CD-${candidateApp.client_unique_id}-${candidateApp.main_id}`;
+          candidateApp.bgv_form_pdf = buildBgvFormPdfUrl(candidateApp, imageHost);
+
           const servicesResult = { cef: {}, dav: {} };
           const servicesIds = candidateApp.services ? candidateApp.services.split(",") : [];
 
@@ -595,6 +651,11 @@ const Customer = {
                       WHEN cef.is_submitted = '1' OR cef.is_submitted = 1 THEN cef.created_at
                       ELSE NULL
                   END AS cef_filled_date,
+                   cef.updated_at AS cef_updated_at,
+                  CASE 
+                      WHEN cef.is_submitted = '1' OR cef.is_submitted = 1 THEN COALESCE(cef.updated_at, cef.created_at)
+                      ELSE NULL
+                  END AS bgv_form_pdf_generated_at,
                   cef.created_at,
                   CASE 
                       WHEN cef.is_submitted = '1' OR cef.is_submitted = 1 THEN cef.id
@@ -662,11 +723,14 @@ const Customer = {
 
       const davResults = await sequelize.query(davSql, { type: QueryTypes.SELECT });
       const digitalAddressID = davResults.length > 0 ? parseInt(davResults[0].id, 10) : null;
+      const imageHost = await getBackendImageHost();
 
       // Process each candidate application
       await Promise.all(
         results.map(async (candidateApp) => {
           candidateApp.applications_id = `CD-${candidateApp.client_unique_id}-${candidateApp.main_id}`;
+                  candidateApp.bgv_form_pdf = buildBgvFormPdfUrl(candidateApp, imageHost);
+
           const servicesResult = { cef: {}, dav: {} };
           const servicesIds = candidateApp.services ? candidateApp.services.split(",") : [];
 

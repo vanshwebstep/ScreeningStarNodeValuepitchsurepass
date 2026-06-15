@@ -104,9 +104,9 @@ exports.list = (req, res) => {
 
 exports.test = async (req, res) => {
   try {
-    const client_application_id = 7381;
-    const client_unique_id = "CL-9342";
-    const application_id = "CL-9342-14";
+    const client_application_id = 7366;
+    const client_unique_id = "CL-TEST-001-7";
+    const application_id = "CL-TEST-001-7-6160 ";
     const branch_id = "171";
     const name = "TESTING ORG";
 
@@ -1630,124 +1630,23 @@ exports.generateReport = (req, res) => {
 
                                       // ================== VALUEPITCH (HIGHEST PRIORITY) ==================
                                       if (hasValuePitch) {
-                                        console.log("🔥 Running VALUEPITCH (Frontend Driven)");
-
-                                        if (!subJson) {
-                                          console.log("❌ subJson missing, skipping...");
-                                          continue;
-                                        }
-
-                                        // ✅ SAME DB SAVE LOGIC AS MANUAL
                                         const annexurePromise = new Promise((resolve, reject) => {
                                           ClientMasterTrackerModel.getCMTAnnexureByApplicationId(
-                                            application_id,
-                                            modifiedDbTable,
-                                            async (err, currentCMTAnnexure) => {
-
+                                            application_id, modifiedDbTable,
+                                            (err, currentCMTAnnexure) => {
                                               if (err) return reject(err);
 
-                                              let annexureLogStatus =
-                                                currentCMTAnnexure && Object.keys(currentCMTAnnexure).length > 0
-                                                  ? "update"
-                                                  : "create";
+                                              const cmt_id = logStatus === "update"
+                                                ? currentCMTApplication.id
+                                                : cmtResult.insertId;
 
-                                              if (logStatus == "update") {
-                                                cmt_id = currentCMTApplication.id;
-                                              } else {
-                                                cmt_id = cmtResult.insertId;
-                                              }
-
-                                              // ✅ SAVE FRONTEND DATA
+                                              // Only save to DB, NO ValuePitch API call
                                               ClientMasterTrackerModel.createOrUpdateAnnexure(
-                                                cmt_id,
-                                                application_id,
-                                                branch_id,
-                                                customer_id,
-                                                modifiedDbTable,
-                                                subJson, // 🔥 IMPORTANT (frontend data)
-                                                types,
-                                                async (err, annexureResult) => {
-
+                                                cmt_id, application_id, branch_id, customer_id,
+                                                modifiedDbTable, subJson, types,
+                                                (err, annexureResult) => {
                                                   if (err) return reject(err);
-
-                                                  // ================= VALUEPITCH API CALL =================
-                                                  const valuePitchToken = await generateValuePitchToken();
-
-                                                  if (!valuePitchToken.status) {
-                                                    console.warn("Token failed");
-                                                    return resolve();
-                                                  }
-
-                                                  // ✅ DATA FROM FRONTEND (subJson)
-                                                  const permanentAddress = subJson;
-
-                                                  const addressParts = [
-                                                    permanentAddress.permanent_address,
-                                                    permanentAddress.permanent_address_street,
-                                                    permanentAddress.permanent_address_city,
-                                                    permanentAddress.permanent_address_state,
-                                                    permanentAddress.permanent_address_pin_code
-                                                  ];
-                                                  console.log('subJson', subJson)
-                                                  const finalAddress = addressParts
-                                                    .filter(p => p)
-                                                    .join(", ");
-
-                                                  // ✅ Helper function — modifiedDbTable se suffix milega
-                                                  const tableSuffix = modifiedDbTable; // e.g. "online_court_records_ca"
-
-                                                  const getValue = (keys) => {
-                                                    for (const key of keys) {
-                                                      // Direct key check
-                                                      if (subJson[key] !== undefined && subJson[key] !== null && subJson[key] !== '')
-                                                        return subJson[key];
-                                                      // Suffixed key check
-                                                      if (subJson[`${key}_${tableSuffix}`] !== undefined && subJson[`${key}_${tableSuffix}`] !== null && subJson[`${key}_${tableSuffix}`] !== '')
-                                                        return subJson[`${key}_${tableSuffix}`];
-                                                    }
-                                                    return null;
-                                                  };
-
-                                                  const addValuePitchCaseData = {
-                                                    name: getValue(['name', 'name_of_the_applicant', 'applicant_name']),
-                                                    applicantId: getValue(['applicantId', 'application_id', 'employee_id']),
-                                                    addresses: [
-                                                      {
-                                                        address: [
-                                                          getValue(['permanent_address']),
-                                                          getValue(['permanent_address_street']),
-                                                          getValue(['permanent_address_main']),
-                                                          getValue(['permanent_address_area']),
-                                                          getValue(['permanent_address_locality']),
-                                                          getValue(['permanent_address_city']),
-                                                          getValue(['permanent_address_taluk']),
-                                                          getValue(['permanent_address_district']),
-                                                          getValue(['permanent_address_state']),
-                                                          getValue(['permanent_address_pin_code']),
-                                                          getValue(['permanent_address_landmark']),
-                                                          getValue(['address']),  // fallback
-                                                        ]
-                                                          .filter(part => part && part.toString().trim() !== "")
-                                                          .join(", "),
-                                                        periodOfStay: getValue(['period_of_stay', 'periodOfStay']) ?? ""
-                                                      }
-                                                    ],
-                                                    dob: getValue(['dob', 'date_of_birth']),
-                                                    fatherName: getValue(['father_name', 'fatherName'])
-                                                  };
-                                                  console.log('addValuePitchCaseData', addValuePitchCaseData)
-                                                  const addCaseResult = await addValuePitchCase(addValuePitchCaseData);
-
-                                                  if (addCaseResult?.data?.verifyId) {
-                                                    await saveValuePitchStatus({
-                                                      service_id: serviceId,
-                                                      application_id: currentClientApplication.id,
-                                                      verifyId: addCaseResult.data.verifyId,
-                                                      response: addCaseResult.data
-                                                    });
-                                                  }
-
-                                                  resolve();
+                                                  resolve(); // Done — no API call
                                                 }
                                               );
                                             }
@@ -2757,7 +2656,10 @@ exports.generateReport = (req, res) => {
 // 1.  VALUEPITCH
 // ─────────────────────────────────────────────────────────────
 exports.submitValuePitch = (req, res) => {
+  console.log("🚀 API HIT: submitValuePitch");
+
   const { ipAddress, ipType } = getClientIpAddress(req);
+  console.log("🌐 IP Info:", { ipAddress, ipType });
 
   const {
     admin_id,
@@ -2765,10 +2667,12 @@ exports.submitValuePitch = (req, res) => {
     branch_id,
     customer_id,
     application_id,
-    annexure,          // only the single annexure entry you want to submit
-    service_id,        // service_id for this annexure
-    db_table,          // e.g. "online_court_records_ca"
+    annexure,
+    service_id,
+    db_table,
   } = req.body;
+
+  console.log("📥 Request Body:", req.body);
 
   // ── required field check ──────────────────────────────────
   const requiredFields = { admin_id, _token, branch_id, customer_id, application_id, annexure, service_id, db_table };
@@ -2777,116 +2681,167 @@ exports.submitValuePitch = (req, res) => {
     .map((f) => f.replace(/_/g, " "));
 
   if (missingFields.length > 0) {
+    console.log("❌ Missing Fields:", missingFields);
     return res.status(400).json({ status: false, message: `Missing required fields: ${missingFields.join(", ")}` });
   }
 
   const action = "admin_manager";
 
+  console.log("🔐 Checking admin authorization...");
   AdminCommon.isAdminAuthorizedForAction(admin_id, action, (AuthResult) => {
-    if (!AuthResult.status) return res.status(403).json({ status: false, message: AuthResult.message });
+    console.log("🔐 Auth Result:", AuthResult);
 
+    if (!AuthResult.status) {
+      console.log("❌ Unauthorized Admin");
+      return res.status(403).json({ status: false, message: AuthResult.message });
+    }
+
+    console.log("🔑 Validating token...");
     AdminCommon.isAdminTokenValid(_token, admin_id, (err, TokenResult) => {
-      if (err) return res.status(500).json({ status: false, message: err.message });
-      if (!TokenResult.status) return res.status(401).json({ status: false, message: TokenResult.message });
+      if (err) {
+        console.error("❌ Token Error:", err);
+        return res.status(500).json({ status: false, message: err.message });
+      }
+
+      console.log("🔑 Token Result:", TokenResult);
+
+      if (!TokenResult.status) {
+        console.log("❌ Invalid Token");
+        return res.status(401).json({ status: false, message: TokenResult.message });
+      }
 
       const newToken = TokenResult.newToken;
+
       const modifiedDbTable = db_table.replace(/-/g, "_").toLowerCase();
+      console.log("📊 Modified DB Table:", modifiedDbTable);
+
       const subJson = annexure[modifiedDbTable] ?? annexure ?? null;
+      console.log("📊 Extracted subJson:", subJson);
 
       if (!subJson) {
+        console.log("❌ Annexure missing");
         return res.status(400).json({ status: false, message: "annexure data is missing or malformed.", token: newToken });
       }
 
-      // ── fetch service ────────────────────────────────────
+      console.log("🔎 Fetching service...");
       Service.getServiceById(service_id, async (err, serviceData) => {
-        if (err) return res.status(500).json({ status: false, message: err.message, token: newToken });
-        if (!serviceData) return res.status(404).json({ status: false, message: `Service not found for ID ${service_id}`, token: newToken });
+        if (err) {
+          console.error("❌ Service Error:", err);
+          return res.status(500).json({ status: false, message: err.message, token: newToken });
+        }
+
+        console.log("📦 Service Data:", serviceData);
+
+        if (!serviceData) {
+          console.log("❌ Service not found");
+          return res.status(404).json({ status: false, message: `Service not found for ID ${service_id}`, token: newToken });
+        }
 
         const serviceType = serviceData.service_type?.trim().toLowerCase() ?? "";
         const types = serviceType.split(",").map((t) => t.trim());
 
+        console.log("📦 Service Types:", types);
+
         if (!types.includes("valuepitch")) {
+          console.log("❌ Not a ValuePitch service");
           return res.status(400).json({ status: false, message: "This service is not of type 'valuepitch'.", token: newToken });
         }
 
-        // ── fetch current CMT application (need cmt_id) ──
+        console.log("📄 Fetching CMT Application...");
         ClientMasterTrackerModel.getCMTApplicationById(application_id, async (err, currentCMTApplication) => {
-          if (err) return res.status(500).json({ status: false, message: err.message, token: newToken });
+          if (err) {
+            console.error("❌ CMT Error:", err);
+            return res.status(500).json({ status: false, message: err.message, token: newToken });
+          }
 
-          // fetch client application (need application.id for saveValuePitchStatus)
+          console.log("📄 CMT Application:", currentCMTApplication);
+
+          console.log("📄 Fetching Client Application...");
           ClientApplication.getClientApplicationById(application_id, async (err, currentClientApplication) => {
-            if (err) return res.status(500).json({ status: false, message: err.message, token: newToken });
-            if (!currentClientApplication) return res.status(404).json({ status: false, message: "Client Application not found.", token: newToken });
+            if (err) {
+              console.error("❌ Client App Error:", err);
+              return res.status(500).json({ status: false, message: err.message, token: newToken });
+            }
+
+            console.log("📄 Client Application:", currentClientApplication);
+
+            if (!currentClientApplication) {
+              console.log("❌ Client Application not found");
+              return res.status(404).json({ status: false, message: "Client Application not found.", token: newToken });
+            }
 
             try {
-              // ── get / create annexure row ────────────────
+              console.log("📊 Fetching Annexure...");
               const currentCMTAnnexure = await new Promise((resolve, reject) => {
                 ClientMasterTrackerModel.getCMTAnnexureByApplicationId(
                   application_id, modifiedDbTable,
-                  (err, data) => { if (err) return reject(err); resolve(data); }
+                  (err, data) => err ? reject(err) : resolve(data)
                 );
               });
 
-              const logStatus = currentCMTApplication && Object.keys(currentCMTApplication).length > 0 ? "update" : "create";
-              const cmt_id = logStatus === "update" ? currentCMTApplication.id : null; // insertId not available here; pass null for create path
+              console.log("📊 Current Annexure:", currentCMTAnnexure);
 
-              // ── save frontend data first ─────────────────
+              const logStatus = currentCMTApplication && Object.keys(currentCMTApplication).length > 0 ? "update" : "create";
+              const cmt_id = logStatus === "update" ? currentCMTApplication.id : null;
+
+              console.log("📊 Log Status:", logStatus, "CMT ID:", cmt_id);
+
+              console.log("💾 Saving Annexure...");
               const annexureResult = await new Promise((resolve, reject) => {
                 ClientMasterTrackerModel.createOrUpdateAnnexure(
                   cmt_id, application_id, branch_id, customer_id,
                   modifiedDbTable, subJson, types,
-                  (err, result) => { if (err) return reject(err); resolve(result); }
+                  (err, result) => err ? reject(err) : resolve(result)
                 );
-              });
+              }); const {
+                name_of_applicant,
+                father_name,
+                dob,
+                applicantId,
+                addresses
+              } = req.body;
 
-              // ── ValuePitch token ─────────────────────────
+              console.log("💾 Annexure Saved:", annexureResult);
+
+              console.log("🔐 Generating ValuePitch Token...");
               const valuePitchToken = await generateValuePitchToken();
+
+              console.log("🔐 ValuePitch Token:", valuePitchToken);
+
               if (!valuePitchToken.status) {
+                console.log("❌ Token generation failed");
                 return res.status(500).json({ status: false, message: "Failed to generate ValuePitch token.", token: newToken });
               }
 
-              // ── build payload ────────────────────────────
+              console.log("📦 Building payload...");
               const tableSuffix = modifiedDbTable;
+
               const getValue = (keys) => {
                 for (const key of keys) {
-                  if (subJson[key] !== undefined && subJson[key] !== null && subJson[key] !== "") return subJson[key];
-                  if (subJson[`${key}_${tableSuffix}`] !== undefined && subJson[`${key}_${tableSuffix}`] !== null && subJson[`${key}_${tableSuffix}`] !== "") return subJson[`${key}_${tableSuffix}`];
+                  if (subJson[key]) return subJson[key];
+                  if (subJson[`${key}_${tableSuffix}`]) return subJson[`${key}_${tableSuffix}`];
                 }
                 return null;
               };
 
-              const addValuePitchCaseData = {
-                name: getValue(["name", "name_of_the_applicant", "applicant_name"]),
-                applicantId: getValue(["applicantId", "application_id", "employee_id"]),
-                addresses: [
-                  {
-                    address: [
-                      getValue(["permanent_address"]),
-                      getValue(["permanent_address_street"]),
-                      getValue(["permanent_address_main"]),
-                      getValue(["permanent_address_area"]),
-                      getValue(["permanent_address_locality"]),
-                      getValue(["permanent_address_city"]),
-                      getValue(["permanent_address_taluk"]),
-                      getValue(["permanent_address_district"]),
-                      getValue(["permanent_address_state"]),
-                      getValue(["permanent_address_pin_code"]),
-                      getValue(["permanent_address_landmark"]),
-                      getValue(["address"]),
-                    ]
-                      .filter((part) => part && part.toString().trim() !== "")
-                      .join(", "),
-                    periodOfStay: getValue(["period_of_stay", "periodOfStay"]) ?? "",
-                  },
-                ],
-                dob: getValue(["dob", "date_of_birth"]),
-                fatherName: getValue(["father_name", "fatherName"]),
+              const payload = {
+                name: name_of_applicant || getValue(["name", "name_of_the_applicant"]),
+                applicantId: applicantId || getValue(["application_id"]),
+                dob: dob || getValue(["dob"]),
+                fatherName: father_name || getValue(["father_name"]),
+                addresses: addresses || getValue(["addresses"]),
+
               };
 
-              // ── call ValuePitch API ──────────────────────
-              const addCaseResult = await addValuePitchCase(addValuePitchCaseData);
+              console.log("📦 Payload:", payload);
+
+              console.log("🚀 Calling ValuePitch API...");
+              const addCaseResult = await addValuePitchCase(payload);
+
+              console.log("🚀 API Response:", addCaseResult);
 
               if (addCaseResult?.data?.verifyId) {
+                console.log("💾 Saving verifyId...");
                 await saveValuePitchStatus({
                   service_id,
                   application_id: currentClientApplication.id,
@@ -2895,12 +2850,7 @@ exports.submitValuePitch = (req, res) => {
                 });
               }
 
-              AdminCommon.adminActivityLog(
-                ipAddress, ipType, admin_id,
-                "CMT Annexure - ValuePitch", logStatus, "1",
-                JSON.stringify({ application_id, db_table: modifiedDbTable }), null, () => { }
-              );
-
+              console.log("✅ SUCCESS");
               return res.status(200).json({
                 status: true,
                 message: "ValuePitch annexure submitted successfully.",
@@ -2909,12 +2859,7 @@ exports.submitValuePitch = (req, res) => {
               });
 
             } catch (error) {
-              console.error("submitValuePitch error:", error);
-              AdminCommon.adminActivityLog(
-                ipAddress, ipType, admin_id,
-                "CMT Annexure - ValuePitch", "create", "0",
-                JSON.stringify({ application_id, db_table: modifiedDbTable }), error, () => { }
-              );
+              console.error("🔥 FINAL ERROR:", error);
               return res.status(500).json({ status: false, message: error.message ?? "Internal server error", token: newToken });
             }
           });
@@ -4122,7 +4067,9 @@ exports.annexureDataByServiceIds = (req, res) => {
                   application_id
                 })
               ]);
-
+              console.log("✅ ValuePitch API calls completed", screeningStarData);
+              console.log("✅ ValuePitch Status Response:", statusRes);
+              console.log("✅ ValuePitch Report Response:", reportRes);
               valuePitchStatusData = statusRes?.data || null;
               valuePitchReportData = reportRes?.data || null;
 
@@ -4174,6 +4121,12 @@ exports.annexureDataByServiceIds = (req, res) => {
           else if (hasManual) {
             console.log("🔥 MANUAL FLOW");
             screeningStarData = null;
+          }
+          else {
+
+            console.log("🔥 MANUAL FLOW");
+            screeningStarData = null;
+
           }
 
           // ================== FINAL RESPONSE ==================

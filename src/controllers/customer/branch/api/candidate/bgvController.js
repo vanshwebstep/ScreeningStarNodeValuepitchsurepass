@@ -1217,7 +1217,7 @@ const sendNotificationEmails = (
   customer_name,
   submitStatus,
   clientApplicationInsertId,
-  res
+  res, onComplete
 ) => {
   // console.log(`Step 1: Check if application exists`);
   Candidate.isApplicationExist(
@@ -1313,6 +1313,9 @@ const sendNotificationEmails = (
                       candidateFormPDFName,
                       candidateFormPdfTargetDirectory
                     );
+                     const pdfUrl = candidateFormPDFPath
+                      ? `${imageHost}/${candidateFormPDFPath}`
+                      : null;
                     console.log("candidateFormPDFPath - ", candidateFormPDFPath);
                     const pdfPath = '';
                     /*
@@ -1412,6 +1415,7 @@ const sendNotificationEmails = (
                                 client_application_id: clientApplicationInsertId,
                                 message:
                                   "BGV Form & documents Submitted.",
+                                   bgv_form_pdf: pdfUrl || null,  
                               });
                             }
                           );
@@ -1426,6 +1430,7 @@ const sendNotificationEmails = (
                             client_application_id: clientApplicationInsertId,
                             message:
                               "BGV Form & documents Submitted.",
+                               bgv_form_pdf: pdfUrl || null, 
                           });
                         });
                     });

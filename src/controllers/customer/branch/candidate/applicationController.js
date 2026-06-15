@@ -340,7 +340,7 @@ exports.create = (req, res) => {
                                     customer.name,
                                     dav_href,
                                     [{ name: name, email: email.trim() }],
-                                    [{ name: "QC Team", email: "qc@screeningstar.com" },{ name: 'BGV Team', email: 'Bgv@screeningstar.com' }]
+                                    [{ name: "QC Team", email: "qc@screeningstar.com" }, { name: 'BGV Team', email: 'Bgv@screeningstar.com' }]
                                   )
                                     .then(() => {
                                       if (shouldSendBoth || shouldSendCreateOnly) {
