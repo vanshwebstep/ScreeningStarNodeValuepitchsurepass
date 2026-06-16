@@ -4,6 +4,8 @@ const clientMasterTrackerController = require("../../controllers/admin/clientMas
 
 // Authentication routes
 router.get("/list", clientMasterTrackerController.list);
+router.get("/list-valuepitch", clientMasterTrackerController.listValuePitch);
+
 router.get("/test", clientMasterTrackerController.test);
 router.get(
   "/branch-list-by-customer",
@@ -13,6 +15,7 @@ router.get(
   "/applications-by-branch",
   clientMasterTrackerController.applicationListByBranch
 );
+router.get("/applications-by-branch-valuepitch", clientMasterTrackerController.applicationListByBranchValuePitch);
 router.get("/application-by-id", clientMasterTrackerController.applicationByID);
 router.get("/filter-options", clientMasterTrackerController.filterOptions);
 router.get(

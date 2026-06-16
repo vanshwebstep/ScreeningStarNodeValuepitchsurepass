@@ -101,6 +101,84 @@ exports.list = (req, res) => {
     });
   });
 };
+exports.listValuePitch  = (req, res) => {
+  const { admin_id, _token, from, to } = req.query;
+
+  // Check for missing fields
+  const missingFields = [];
+  if (!admin_id) missingFields.push("Admin ID");
+  if (!_token) missingFields.push("Token");
+
+  // Return error if there are missing fields
+  if (missingFields.length > 0) {
+    return res.status(400).json({
+      status: false,
+      message: `Missing required fields: ${missingFields.join(", ")}`,
+    });
+  }
+
+  const action = "admin_manager";
+  AdminCommon.isAdminAuthorizedForAction(admin_id, action, (authResult) => {
+    if (!authResult.status) {
+      return res.status(403).json({
+        status: false,
+        message: authResult.message, // Return the message from the authorization function
+      });
+    }
+
+    // Verify admin token
+    AdminCommon.isAdminTokenValid(_token, admin_id, (err, tokenResult) => {
+      if (err) {
+        console.error("Error checking token validity:", err);
+        return res.status(500).json({ status: false, message: err.message });
+      }
+
+      if (!tokenResult.status) {
+        return res
+          .status(401)
+          .json({ status: false, message: tokenResult.message });
+      }
+
+      const newToken = tokenResult.newToken;
+
+      // Fetch all required data
+      const dataPromises = [
+        new Promise((resolve) =>
+          ClientMasterTrackerModel.list(from, to, (err, result) => {
+            if (err) return resolve([]);
+            resolve(result);
+          })
+        ),
+        new Promise((resolve) =>
+          ClientMasterTrackerModel.filterOptionsForCustomers(from, to, (err, result) => {
+            if (err) return resolve([]);
+            resolve(result);
+          })
+        ),
+      ];
+
+      Promise.all(dataPromises).then(([customers, filterOptionsForCustomers]) => {
+        const valuePitchCustomers = customers.filter(
+    (c) => (c.valuepitch_application_count || 0) > 0
+  );
+        res.json({
+          status: true,
+          message: "Customers fetched successfully",
+          data: {
+            customers : valuePitchCustomers,
+            filterOptions: filterOptionsForCustomers,
+          },
+          totalResults: {
+            customers: valuePitchCustomers.length,
+            filterOptions: filterOptionsForCustomers.length,
+          },
+          token: newToken,
+        });
+      });
+    });
+  });
+};
+
 
 exports.test = async (req, res) => {
   try {
@@ -370,7 +448,154 @@ exports.applicationListByBranch = (req, res) => {
     });
   });
 };
+exports.applicationListByBranchValuePitch = (req, res) => {
+  const { filter_status, branch_id, admin_id, _token, status } = req.query;
 
+  let missingFields = [];
+  if (!branch_id || branch_id === "" || branch_id === "undefined")
+    missingFields.push("Branch ID");
+  if (!admin_id || admin_id === "" || admin_id === "undefined")
+    missingFields.push("Admin ID");
+  if (!_token || _token === "" || _token === "undefined")
+    missingFields.push("Token");
+
+  if (missingFields.length > 0) {
+    return res.status(400).json({
+      status: false,
+      message: `Missing required fields: ${missingFields.join(", ")}`,
+    });
+  }
+
+  const action = "admin_manager";
+  AdminCommon.isAdminAuthorizedForAction(admin_id, action, (result) => {
+    if (!result.status) {
+      return res.status(403).json({ status: false, message: result.message });
+    }
+
+    Branch.getBranchById(branch_id, (err, currentBranch) => {
+      if (err) {
+        return res.status(500).json({
+          status: false,
+          message: "Failed to retrieve Branch. Please try again.",
+        });
+      }
+
+      if (!currentBranch) {
+        return res.status(404).json({ status: false, message: "Branch not found." });
+      }
+
+      Customer.infoByID(parseInt(currentBranch.customer_id), (err, currentCustomer) => {
+        if (err) {
+          return res.status(500).json({
+            status: false,
+            message: "Failed to retrieve Customer. Please try again.",
+          });
+        }
+
+        if (!currentCustomer) {
+          return res.status(404).json({ status: false, message: "Customer not found." });
+        }
+
+        AdminCommon.isAdminTokenValid(_token, admin_id, (err, result) => {
+          if (err) {
+            return res.status(500).json({ status: false, message: err.message });
+          }
+
+          if (!result.status) {
+            return res.status(401).json({ status: false, message: result.message });
+          }
+
+          const newToken = result.newToken;
+
+          const resolvedStatus =
+            !status || status === "" || status === "undefined" ? null : status;
+
+          ClientMasterTrackerModel.applicationListByBranch(
+            filter_status,
+            branch_id,
+            resolvedStatus,
+            async (err, applications) => {
+              if (err) {
+                return res.status(500).json({
+                  status: false,
+                  message: err.message,
+                  token: newToken,
+                });
+              }
+
+              // ── ValuePitch filter ──────────────────────────────
+              const valuePitchApplications = [];
+
+              for (const app of applications) {
+                // service_ids field expected on each application row
+                // adjust key name if different in your model
+                const serviceIdsRaw = app.service_ids ?? app.services ?? null;
+
+                if (!serviceIdsRaw) continue;
+
+                const serviceIdList = String(serviceIdsRaw)
+                  .split(",")
+                  .map((id) => id.trim())
+                  .filter(Boolean);
+
+                let hasValuePitch = false;
+
+                for (const sid of serviceIdList) {
+                  const serviceData = await new Promise((resolve) => {
+                    Service.getServiceById(sid, (err, data) => resolve(data || null));
+                  });
+
+                  if (!serviceData) continue;
+
+                  const types = (serviceData.service_type ?? "")
+                    .trim()
+                    .toLowerCase()
+                    .split(",")
+                    .map((t) => t.trim());
+
+                  if (types.includes("valuepitch")) {
+                    hasValuePitch = true;
+                    break;
+                  }
+                }
+
+                if (hasValuePitch) valuePitchApplications.push(app);
+              }
+              // ───────────────────────────────────────────────────
+
+              ClientMasterTrackerModel.filterOptionsForApplicationListing(
+                currentBranch.customer_id,
+                branch_id,
+                (err, filterOptions) => {
+                  if (err) {
+                    return res.status(500).json({
+                      status: false,
+                      message: "An error occurred while fetching Filter options data.",
+                      error: err,
+                    });
+                  }
+
+                  return res.json({
+                    status: true,
+                    message: "ValuePitch applications fetched successfully",
+                    branchName: currentBranch.name,
+                    customerName: currentCustomer.name,
+                    customerEmails: currentCustomer.emails,
+                    tatDays: currentCustomer.tat_days,
+                    customers: valuePitchApplications,
+                    totalResults: valuePitchApplications.length,
+                    filterOptions,
+                    token: newToken,
+                  });
+                }
+              );
+            }
+          );
+        });
+      });
+    });
+  });
+};
 exports.applicationByID = (req, res) => {
   const { application_id, branch_id, admin_id, _token } = req.query;
 

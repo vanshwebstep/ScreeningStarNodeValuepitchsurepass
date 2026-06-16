@@ -502,7 +502,16 @@ const Customer = {
                                       LIMIT 1
                                   )
                             ) AS head_branch_applications_count,
-
+                             -- ValuePitch application count
+                            (
+                                SELECT COUNT(DISTINCT ca_vp.id)
+                                FROM client_applications ca_vp
+                                INNER JOIN services s_vp ON FIND_IN_SET(s_vp.id, ca_vp.services)
+                                WHERE ca_vp.customer_id = c.id
+                                  AND ca_vp.is_deleted != 1
+                                  AND s_vp.service_type LIKE '%valuepitch%'
+                                  ${dateFilter('ca_vp')}
+                            ) AS valuepitch_application_count,
                             -- Latest application date
                             (
                                 SELECT MAX(ca11.created_at)
