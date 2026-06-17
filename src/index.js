@@ -42,6 +42,7 @@ const externalLoginCredentials = require("./routes/admin/externalLoginCredential
 const documentCheckInTrackerRoutes = require("./routes/admin/documentCheckInTrackerRoutes");
 const candidateMasterTrackerRoutes = require("./routes/admin/candidateMasterTrackerRoutes");
 const expenseTrackerRoutes = require("./routes/admin/expenseTrackerRoutes");
+const { startValuePitchReportPolling } = require("./cron-jobs/valuePitchReportPolling");
 
 const app = express();
 const port = process.env.PORT || 3000;
@@ -111,6 +112,7 @@ app.use((err, req, res, next) => {
 // Start the server
 app.listen(port, () => {
   console.log(`Server running on port ${port}`);
+  startValuePitchReportPolling();
 });
 
 process.on("uncaughtException", (err) => {

@@ -24,7 +24,8 @@ const { generatePDF } = require("../../utils/finalReportPdf");
 const { upload, saveImage, saveImages } = require("../../utils/cloudImageSave");
 const { getClientIpAddress } = require("../../utils/ipAddress");
 const { getSurepassStatusList, getServicesWithPrefill } = require("../../utils/external-tools/surePass");
-const { generateValuePitchToken, addValuePitchCase, fetchValuePitchStatus, fetchValuePitchReportData, getValuePitchFromDB, saveValuePitchStatus } = require("../../utils/external-tools/valuePitch");
+const { generateValuePitchToken, addValuePitchCase, fetchValuePitchStatus, fetchValuePitchReportData, getValuePitchFromDB, saveValuePitchStatus, getValuePitchCheckinStatuses } = require("../../utils/external-tools/valuePitch");
+const { runValuePitchReadyPoll } = require("../../cron-jobs/valuePitchReportPolling");
 
 // Controller to list all customers
 exports.list = (req, res) => {
@@ -538,7 +539,7 @@ exports.applicationListByBranchValuePitch = (req, res) => {
                   .map((id) => id.trim())
                   .filter(Boolean);
 
-                let hasValuePitch = false;
+                const valuePitchServiceDetails = [];
 
                 for (const sid of serviceIdList) {
                   const serviceData = await new Promise((resolve) => {
@@ -554,12 +555,60 @@ exports.applicationListByBranchValuePitch = (req, res) => {
                     .map((t) => t.trim());
 
                   if (types.includes("valuepitch")) {
-                    hasValuePitch = true;
-                    break;
+                    valuePitchServiceDetails.push({
+                      service_id: sid,
+                      service_name: serviceData.title || serviceData.service_name || `Service ${sid}`,
+                    });
                   }
                 }
 
-                if (hasValuePitch) valuePitchApplications.push(app);
+                if (valuePitchServiceDetails.length) {
+                  const statusMap = await getValuePitchCheckinStatuses(
+                    app.main_id || app.id,
+                    valuePitchServiceDetails.map((service) => service.service_id)
+                  );
+
+                  const valuePitchServices = valuePitchServiceDetails.map((service) => {
+                    const statusData = statusMap[String(service.service_id)] || null;
+                    const reportReady = Boolean(statusData?.reportReady);
+                    const responseReceived = Boolean(statusData?.responseReceived);
+
+                    return {
+                      ...service,
+                      verifyId: statusData?.verifyId || null,
+                      statusCode: statusData?.statusCode || null,
+                      statusMsg: statusData?.statusMsg || null,
+                      report: statusData?.report || null,
+                      reportUrl: statusData?.reportUrl || null,
+                      responseReceived,
+                      reportReady,
+                      status: reportReady
+                        ? "report_ready"
+                        : responseReceived
+                          ? "response_pending"
+                          : "not_submitted",
+                      label: reportReady
+                        ? "Report Ready"
+                        : responseReceived
+                          ? "Response Aaya - Report Pending"
+                          : "Response Nahi Aaya",
+                      lastCheckedAt: statusData?.lastCheckedAt || null
+                    };
+                  });
+
+                  valuePitchApplications.push({
+                    ...app,
+                    valuePitchServices,
+                    valuePitchCheckinStatus: valuePitchServices.every((service) => service.reportReady)
+                      ? "all_ready"
+                      : valuePitchServices.some((service) => service.responseReceived)
+                        ? "partial_or_pending"
+                        : "not_submitted",
+                    valuePitchCheckinLabel: valuePitchServices
+                      .map((service) => `${service.service_name}: ${service.label}`)
+                      .join(" | ")
+                  });
+                }
               }
               // ───────────────────────────────────────────────────
 
@@ -3072,6 +3121,12 @@ exports.submitValuePitch = (req, res) => {
                   application_id: currentClientApplication.id,
                   verifyId: addCaseResult.data.verifyId,
                   response: addCaseResult.data,
+                });
+
+                setImmediate(() => {
+                  runValuePitchReadyPoll().catch((pollError) => {
+                    console.error("ValuePitch immediate polling failed:", pollError?.message || pollError);
+                  });
                 });
               }
 
