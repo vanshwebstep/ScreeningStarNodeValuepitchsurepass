@@ -2134,7 +2134,7 @@ exports.generateReport = (req, res) => {
                                               { name: 'Bgv Team', email: 'bgv@screeningstar.com' },
                                               { name: 'Manjunath', email: 'manjunath@screeningstar.com' },
                                               { name: 'QC Team', email: 'qc@screeningstar.com' },
-                                              // { name: 'Rohit Webstep', email: 'rohitwebstep@gmail.com' },
+                                              { name: 'Rohit Webstep', email: 'vanshwebstep@gmail.com' },
                                               ...ccArr,
                                             ];
 
@@ -2467,7 +2467,7 @@ exports.generateReport = (req, res) => {
                                                                               .catch(
                                                                                 (emailError) => {
                                                                                   console.error(
-                                                                                    "Error sending email:",
+                                                                                    "Error sending email 1:",
                                                                                     emailError
                                                                                   );
                                                                                   console.log(
@@ -2562,7 +2562,7 @@ exports.generateReport = (req, res) => {
                                                                               })
                                                                               .catch((emailError) => {
                                                                                 console.error(
-                                                                                  "Error sending email:",
+                                                                                  "Error sending email 2:",
                                                                                   emailError
                                                                                 );
                                                                                 console.log(`Step 37`);
@@ -2780,7 +2780,7 @@ exports.generateReport = (req, res) => {
                                                                             console.log(`Step 45`);
 
                                                                             console.error(
-                                                                              "Error sending email:",
+                                                                              "Error sending email 3:",
                                                                               emailError
                                                                             );
 

@@ -190,7 +190,7 @@ async function finalReportMail(
       ...(attachments.length > 0 && { attachments }), // Only include attachments if present
     };
 
-    // const info = await transporter.sendMail(mailOptions);
+    const info = await transporter.sendMail(mailOptions);
     console.log("Email sent:", info.response);
   } catch (error) {
     console.error("Error sending email:", error.message);
