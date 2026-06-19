@@ -1287,6 +1287,7 @@ module.exports = {
                                                                     // const serviceTypes = serviceType.split(',').map(s => s.trim().toLowerCase())
                                                                     // ================= VALUEPITCH =================
                                                                     if (serviceTypes.includes("valuepitch")) {
+
                                                                         const vpStatus = service?.valuePitchStatus;
                                                                         const vpReport = service?.valuePitchReport;
 
@@ -1295,9 +1296,9 @@ module.exports = {
                                                                             vpStatus?.statusMsg?.toLowerCase().includes("ready") &&
                                                                             vpReport?.report
                                                                         ) {
-                                                                            rawStatus = vpReport.report; // ✅ GREEN / RED
+                                                                            rawStatus = service?.annexureData.status || 'N/A'; // ✅ GREEN / RED
                                                                         } else {
-                                                                            rawStatus = "Managed By ValuePitch API";
+                                                                            rawStatus = service?.annexureData.status || 'N/A';
                                                                         }
                                                                     }
                                                                     if (serviceTypes.includes("surepass")) {
@@ -1355,13 +1356,11 @@ module.exports = {
                                                                                     const vpReport = service?.valuePitchReport;
 
                                                                                     if (vpReport?.job_name) {
-                                                                                        return vpReport.job_name
-                                                                                            .split(":")[0]                // remove time
-                                                                                            .replace(/_/g, ' ')          // underscores → spaces
-                                                                                            .replace(/\b\w/g, c => c.toUpperCase());
+                                                                                        return "Manjunatha H S - Advocate"
                                                                                     }
-                                                                                    return "Managed By ValuePitch API";
+                                                                                    return "Manjunatha H S - Advocate";
                                                                                 }
+
 
 
                                                                                 // ================= DEFAULT =================
@@ -1399,15 +1398,15 @@ module.exports = {
                                                                                 };
 
                                                                                 // ================= VALUEPITCH =================
-                                                                                if (serviceTypes.includes("valuepitch")) {
-                                                                                    const vpReport = service?.valuePitchReport;
+                                                                                // if (serviceTypes.includes("valuepitch")) {
+                                                                                //     const vpReport = service?.valuePitchReport;
 
-                                                                                    if (vpReport?.dateOfVerification) {
-                                                                                        return formatDate(vpReport.dateOfVerification);
-                                                                                    }
+                                                                                //     if (vpReport?.dateOfVerification) {
+                                                                                //         return formatDate(vpReport.dateOfVerification);
+                                                                                //     }
 
-                                                                                    return "N/A";
-                                                                                }
+                                                                                //     return "N/A";
+                                                                                // }
 
                                                                                 // ================= DEFAULT =================
                                                                                 const annexure = Array.isArray(service?.annexureData)
@@ -1431,26 +1430,26 @@ module.exports = {
                                                                         },
                                                                         {
                                                                             content: (() => {
-                                                                                const serviceType = service?.service_type || "";
+                                                                                const serviceType = service?.annexureData.status || service?.service_type ||  "";
                                                                                 const serviceTypes = serviceType.split(',').map(s => s.trim().toLowerCase());
-
+                                                                                console.log('service12121212121', service)
                                                                                 // ================= VALUEPITCH =================
-                                                                                if (serviceTypes.includes("valuepitch")) {
-                                                                                    const vpStatus = service?.valuePitchStatus;
-                                                                                    const vpReport = service?.valuePitchReport;
+                                                                                // if (serviceTypes.includes("valuepitch")) {
+                                                                                //     const vpStatus = service?.valuePitchStatus;
+                                                                                //     const vpReport = service?.valuePitchReport;
 
-                                                                                    // ✅ Report Ready
-                                                                                    if (
-                                                                                        vpStatus?.statusCode === 201 &&
-                                                                                        vpStatus?.statusMsg?.toLowerCase().includes("ready") &&
-                                                                                        vpReport?.report
-                                                                                    ) {
-                                                                                        return vpReport.report.toUpperCase(); // GREEN / RED etc.
-                                                                                    }
+                                                                                //     // ✅ Report Ready
+                                                                                //     if (
+                                                                                //         vpStatus?.statusCode === 201 &&
+                                                                                //         vpStatus?.statusMsg?.toLowerCase().includes("ready") &&
+                                                                                //         vpReport?.report
+                                                                                //     ) {
+                                                                                //         return vpReport.report.toUpperCase(); // GREEN / RED etc.
+                                                                                //     }
 
-                                                                                    // ❌ Not Ready
-                                                                                    return "MANAGED BY VALUEPITCH API";
-                                                                                }
+                                                                                //     // ❌ Not Ready
+                                                                                //     return "MANAGED BY VALUEPITCH API";
+                                                                                // }
 
                                                                                 // ================= SUREPASS =================
                                                                                 if (serviceTypes.includes("surepass")) {
@@ -1465,7 +1464,7 @@ module.exports = {
                                                                                 fontStyle: 'bold',
                                                                                 font: 'TimesNewRomanBold',
                                                                                 textColor: (() => {
-                                                                                    const serviceType = service?.service_type || "";
+                                                                                    const serviceType = service?.annexureData.status || service?.service_type || "";
                                                                                     const serviceTypes = serviceType.split(',').map(s => s.trim().toLowerCase());
 
                                                                                     // ================= VALUEPITCH =================
@@ -1622,201 +1621,202 @@ module.exports = {
                                                                     const serviceTypes = serviceTypeRaw
                                                                         .split(',')
                                                                         .map(s => s.trim().toLowerCase());
+                                                                    let vpReport = service?.valuePitchReport || null;
 
                                                                     let tableData = [];
-                                                                    if (serviceTypes.includes("valuepitch")) {
-                                                                        const vpStatus = service?.valuePitchStatus;
+                                                                    // if (serviceTypes.includes("valuepitch")) {
+                                                                    //     const vpStatus = service?.valuePitchStatus;
 
-                                                                        // ✅ Report Ready
-                                                                        if (
-                                                                            vpStatus?.statusCode === 201 &&
-                                                                            vpStatus?.statusMsg?.toLowerCase().includes("ready")
-                                                                        ) {
-                                                                            const vpReport = service?.valuePitchReport || {};
-                                                                            console.log('vpReport', vpReport)
-                                                                            tableData = [
-                                                                                ["Name", vpReport?.name || "N/A"],
-                                                                                ["Report", vpReport?.report || "N/A"],
-                                                                                ["Address", vpReport?.addresses?.[0]?.address || "N/A"],
-                                                                                ["Date Of Verification",
-                                                                                    vpReport?.dateOfVerification
-                                                                                        ? new Date(vpReport.dateOfVerification)
-                                                                                            .toLocaleDateString('en-GB')
-                                                                                            .replace(/\//g, '-')
-                                                                                        : "N/A"
-                                                                                ],
-                                                                                ["Report URL", vpReport?.reportUrl || "N/A"],
-                                                                            ];
-                                                                        }
+                                                                    //     // ✅ Report Ready
+                                                                    //     if (
+                                                                    //         vpStatus?.statusCode === 201 &&
+                                                                    //         vpStatus?.statusMsg?.toLowerCase().includes("ready")
+                                                                    //     ) {
+                                                                    //         const vpReport = service?.valuePitchReport || {};
+                                                                    //         console.log('vpReport', vpReport)
+                                                                    //         tableData = [
+                                                                    //             ["Name", vpReport?.name || "N/A"],
+                                                                    //             ["Report", vpReport?.report || "N/A"],
+                                                                    //             ["Address", vpReport?.addresses?.[0]?.address || "N/A"],
+                                                                    //             ["Date Of Verification",
+                                                                    //                 vpReport?.dateOfVerification
+                                                                    //                     ? new Date(vpReport.dateOfVerification)
+                                                                    //                         .toLocaleDateString('en-GB')
+                                                                    //                         .replace(/\//g, '-')
+                                                                    //                     : "N/A"
+                                                                    //             ],
+                                                                    //             ["Report URL", vpReport?.reportUrl || "N/A"],
+                                                                    //         ];
+                                                                    //     }
 
-                                                                        // ❌ Report Not Ready
-                                                                        else if (vpStatus?.statusMsg) {
-                                                                            tableData = [
-                                                                                [vpStatus.statusMsg]
-                                                                            ];
-                                                                        }
-                                                                    }
+                                                                    //     // ❌ Report Not Ready
+                                                                    //     else if (vpStatus?.statusMsg) {
+                                                                    //         tableData = [
+                                                                    //             [vpStatus.statusMsg]
+                                                                    //         ];
+                                                                    //     }
+                                                                    // }
 
                                                                     // ================= SUREPASS =================
                                                                     // ================= SUREPASS =================
-                                                                    else if (serviceTypes.includes("surepass")) {
-                                                                        const sp = service?.screeningstar_response;
+                                                                    // else if (serviceTypes.includes("surepass")) {
+                                                                    //     const sp = service?.screeningstar_response;
 
-                                                                        if (!sp || !sp.is_prefilled) {
-                                                                            tableData = [
-                                                                                ["Status", "Managed by Surepass API"]
-                                                                            ];
-                                                                        } else {
-                                                                            const res = sp.response_json || {};
-                                                                            const req = sp.request_json || {};
+                                                                    //     if (!sp || !sp.is_prefilled) {
+                                                                    //         tableData = [
+                                                                    //             ["Status", "Managed by Surepass API"]
+                                                                    //         ];
+                                                                    //     } else {
+                                                                    //         const res = sp.response_json || {};
+                                                                    //         const req = sp.request_json || {};
 
-                                                                            // 🔥 STATUS
-                                                                            const getStatus = () => {
-                                                                                if (res?.success === true || res?.status_code === 200) return "SUCCESS";
-                                                                                if (res?.status_code >= 500) return "SERVER ERROR";
-                                                                                if (res?.errors || res?.success === false) return "FAILED";
-                                                                                return "PENDING";
-                                                                            };
+                                                                    //         // 🔥 STATUS
+                                                                    //         const getStatus = () => {
+                                                                    //             if (res?.success === true || res?.status_code === 200) return "SUCCESS";
+                                                                    //             if (res?.status_code >= 500) return "SERVER ERROR";
+                                                                    //             if (res?.errors || res?.success === false) return "FAILED";
+                                                                    //             return "PENDING";
+                                                                    //         };
 
-                                                                            const formatKey = (key) =>
-                                                                                key?.replace(/_/g, " ")
-                                                                                    ?.replace(/\b\w/g, c => c.toUpperCase());
+                                                                    //         const formatKey = (key) =>
+                                                                    //             key?.replace(/_/g, " ")
+                                                                    //                 ?.replace(/\b\w/g, c => c.toUpperCase());
 
-                                                                            const cleanValue = (value) => {
-                                                                                if (value === null || value === undefined) return "N/A";
-                                                                                if (typeof value === "boolean") return value ? "Yes" : "No";
-                                                                                return value.toString();
-                                                                            };
+                                                                    //         const cleanValue = (value) => {
+                                                                    //             if (value === null || value === undefined) return "N/A";
+                                                                    //             if (typeof value === "boolean") return value ? "Yes" : "No";
+                                                                    //             return value.toString();
+                                                                    //         };
 
-                                                                            const cleanText = (text) => {
-                                                                                return String(text)
-                                                                                    .replace(/[^\x00-\x7F]/g, "")
-                                                                                    .replace(/\s+/g, " ")
-                                                                                    .trim();
-                                                                            };
+                                                                    //         const cleanText = (text) => {
+                                                                    //             return String(text)
+                                                                    //                 .replace(/[^\x00-\x7F]/g, "")
+                                                                    //                 .replace(/\s+/g, " ")
+                                                                    //                 .trim();
+                                                                    //         };
 
-                                                                            // 🔥 RECURSIVE FUNCTION
-                                                                            const buildRows = (obj) => {
-                                                                                let rows = [];
+                                                                    //         // 🔥 RECURSIVE FUNCTION
+                                                                    //         const buildRows = (obj) => {
+                                                                    //             let rows = [];
 
-                                                                                Object.entries(obj).forEach(([key, value]) => {
-                                                                                    if (typeof value === "object" && value !== null && !Array.isArray(value)) {
-                                                                                        // ✅ FIX: section header → only ONE column
-                                                                                        rows.push([formatKey(key)]);
-                                                                                        rows = rows.concat(buildRows(value));
-                                                                                    }
-                                                                                    else if (Array.isArray(value)) {
-                                                                                        value.forEach((item, idx) => {
-                                                                                            if (typeof item === "object") {
-                                                                                                rows = rows.concat(buildRows(item));
-                                                                                            } else {
-                                                                                                rows.push([`${formatKey(key)} ${idx + 1}`, cleanValue(item)]);
-                                                                                            }
-                                                                                        });
-                                                                                    }
-                                                                                    else {
-                                                                                        rows.push([cleanText(formatKey(key)), cleanValue(value)]);
-                                                                                    }
-                                                                                });
+                                                                    //             Object.entries(obj).forEach(([key, value]) => {
+                                                                    //                 if (typeof value === "object" && value !== null && !Array.isArray(value)) {
+                                                                    //                     // ✅ FIX: section header → only ONE column
+                                                                    //                     rows.push([formatKey(key)]);
+                                                                    //                     rows = rows.concat(buildRows(value));
+                                                                    //                 }
+                                                                    //                 else if (Array.isArray(value)) {
+                                                                    //                     value.forEach((item, idx) => {
+                                                                    //                         if (typeof item === "object") {
+                                                                    //                             rows = rows.concat(buildRows(item));
+                                                                    //                         } else {
+                                                                    //                             rows.push([`${formatKey(key)} ${idx + 1}`, cleanValue(item)]);
+                                                                    //                         }
+                                                                    //                     });
+                                                                    //                 }
+                                                                    //                 else {
+                                                                    //                     rows.push([cleanText(formatKey(key)), cleanValue(value)]);
+                                                                    //                 }
+                                                                    //             });
 
-                                                                                return rows;
-                                                                            };
+                                                                    //             return rows;
+                                                                    //         };
 
-                                                                            // ================= BUILD TABLE =================
-                                                                            tableData = [
-                                                                                ["Status", getStatus()],
-                                                                            ];
+                                                                    //         // ================= BUILD TABLE =================
+                                                                    //         tableData = [
+                                                                    //             ["Status", getStatus()],
+                                                                    //         ];
 
-                                                                            if (res?.message) {
-                                                                                tableData.push(["Message", res.message]);
-                                                                            }
+                                                                    //         if (res?.message) {
+                                                                    //             tableData.push(["Message", res.message]);
+                                                                    //         }
 
-                                                                            if (res?.message_code) {
-                                                                                tableData.push(["Code", formatKey(res.message_code)]);
-                                                                            }
+                                                                    //         if (res?.message_code) {
+                                                                    //             tableData.push(["Code", formatKey(res.message_code)]);
+                                                                    //         }
 
-                                                                            // 🔥 REQUEST DATA
-                                                                            tableData.push(["Request Data"]); // ✅ FIXED
-                                                                            tableData = tableData.concat(buildRows(req));
+                                                                    //         // 🔥 REQUEST DATA
+                                                                    //         tableData.push(["Request Data"]); // ✅ FIXED
+                                                                    //         tableData = tableData.concat(buildRows(req));
 
-                                                                            // 🔥 RESPONSE DATA
-                                                                            if (res && Object.keys(res).length) {
-                                                                                tableData.push(["Response Data"]); // ✅ FIXED
-                                                                                tableData = tableData.concat(buildRows(res));
-                                                                            }
+                                                                    //         // 🔥 RESPONSE DATA
+                                                                    //         if (res && Object.keys(res).length) {
+                                                                    //             tableData.push(["Response Data"]); // ✅ FIXED
+                                                                    //             tableData = tableData.concat(buildRows(res));
+                                                                    //         }
 
-                                                                            // ❌ ERRORS
-                                                                            if (res?.errors) {
-                                                                                tableData.push(["Errors"]); // ✅ FIXED
-                                                                                tableData = tableData.concat(buildRows(res.errors));
-                                                                            }
-                                                                        }
-                                                                    }
+                                                                    //         // ❌ ERRORS
+                                                                    //         if (res?.errors) {
+                                                                    //             tableData.push(["Errors"]); // ✅ FIXED
+                                                                    //             tableData = tableData.concat(buildRows(res.errors));
+                                                                    //         }
+                                                                    //     }
+                                                                    // }
 
                                                                     // ================= DEFAULT =================
-                                                                    else {
-                                                                        tableData = serviceData
-                                                                            .map((data, index) => {
+                                                                    // else {
+                                                                    tableData = serviceData
+                                                                        .map((data, index) => {
 
-                                                                                if (!data || !data.values) {
-                                                                                    console.log("Skipped: data or data.values is missing");
-                                                                                    return null;
+                                                                            if (!data || !data.values) {
+                                                                                console.log("Skipped: data or data.values is missing");
+                                                                                return null;
+                                                                            }
+
+                                                                            const name = data.values.name;
+                                                                            // console.log("Extracted name:", name);
+
+                                                                            if (!name || name.startsWith("annexure")) {
+                                                                                console.log("Skipped: name is invalid or starts with 'annexure'");
+                                                                                return null;
+                                                                            }
+
+                                                                            const isVerifiedExist = data.values.isVerifiedExist;
+                                                                            const rawValue = data.values[name];
+                                                                            const verified = data.values[`verified_${name}`];
+
+                                                                            // fallback: if rawValue is undefined but verified is present, use verified as value
+
+                                                                            const finalValue = rawValue !== undefined ? rawValue : verified;
+
+                                                                            if (name == 'additional_fee_police_verification_pa') {
+
+                                                                            }
+
+                                                                            const formatDate = (dateStr) => {
+                                                                                const date = new Date(dateStr);
+                                                                                if (isNaN(date)) {
+                                                                                    console.log("Invalid date string:", dateStr);
+                                                                                    return dateStr;
                                                                                 }
+                                                                                const day = String(date.getDate()).padStart(2, '0');
+                                                                                const month = String(date.getMonth() + 1).padStart(2, '0');
+                                                                                const year = date.getFullYear();
+                                                                                const formatted = `${day}-${month}-${year}`;
+                                                                                console.log("Formatted date:", formatted);
+                                                                                return formatted;
+                                                                            };
 
-                                                                                const name = data.values.name;
-                                                                                // console.log("Extracted name:", name);
+                                                                            const formattedValue =
+                                                                                typeof finalValue === 'string' && finalValue.match(/^\d{4}-\d{2}-\d{2}$/)
+                                                                                    ? formatDate(finalValue)
+                                                                                    : finalValue;
 
-                                                                                if (!name || name.startsWith("annexure")) {
-                                                                                    console.log("Skipped: name is invalid or starts with 'annexure'");
-                                                                                    return null;
-                                                                                }
+                                                                            const formattedVerified =
+                                                                                typeof verified === 'string' && verified.match(/^\d{4}-\d{2}-\d{2}$/)
+                                                                                    ? formatDate(verified)
+                                                                                    : verified;
 
-                                                                                const isVerifiedExist = data.values.isVerifiedExist;
-                                                                                const rawValue = data.values[name];
-                                                                                const verified = data.values[`verified_${name}`];
+                                                                            const result = formattedVerified
+                                                                                ? [data.label, formattedValue, formattedVerified]
+                                                                                : [data.label, formattedValue];
 
-                                                                                // fallback: if rawValue is undefined but verified is present, use verified as value
+                                                                            console.log("Mapped result:", result);
 
-                                                                                const finalValue = rawValue !== undefined ? rawValue : verified;
-
-                                                                                if (name == 'additional_fee_police_verification_pa') {
-
-                                                                                }
-
-                                                                                const formatDate = (dateStr) => {
-                                                                                    const date = new Date(dateStr);
-                                                                                    if (isNaN(date)) {
-                                                                                        console.log("Invalid date string:", dateStr);
-                                                                                        return dateStr;
-                                                                                    }
-                                                                                    const day = String(date.getDate()).padStart(2, '0');
-                                                                                    const month = String(date.getMonth() + 1).padStart(2, '0');
-                                                                                    const year = date.getFullYear();
-                                                                                    const formatted = `${day}-${month}-${year}`;
-                                                                                    console.log("Formatted date:", formatted);
-                                                                                    return formatted;
-                                                                                };
-
-                                                                                const formattedValue =
-                                                                                    typeof finalValue === 'string' && finalValue.match(/^\d{4}-\d{2}-\d{2}$/)
-                                                                                        ? formatDate(finalValue)
-                                                                                        : finalValue;
-
-                                                                                const formattedVerified =
-                                                                                    typeof verified === 'string' && verified.match(/^\d{4}-\d{2}-\d{2}$/)
-                                                                                        ? formatDate(verified)
-                                                                                        : verified;
-
-                                                                                const result = formattedVerified
-                                                                                    ? [data.label, formattedValue, formattedVerified]
-                                                                                    : [data.label, formattedValue];
-
-                                                                                console.log("Mapped result:", result);
-
-                                                                                return result;
-                                                                            })
-                                                                            .filter((item) => item !== null);
-                                                                    }
+                                                                            return result;
+                                                                        })
+                                                                        .filter((item) => item !== null);
+                                                                    // }
 
                                                                     if (tableData.length > 0) {
 
@@ -1860,7 +1860,9 @@ module.exports = {
                                                                             styles: { halign: "left", fontStyle: "bold" }
                                                                         }));
                                                                         const isTwoColumnBody = dynamicHead.length < 3;
-
+                                                                        if (serviceTypes.includes("valuepitch") && vpReport?.reportUrl) {
+                                                                            tableData.push(["Report URL", ""]); // Cell empty rahegi, didDrawCell handle karega
+                                                                        }
                                                                         doc.autoTable({
                                                                             head: [dynamicHead],
                                                                             body: tableData
@@ -1960,6 +1962,36 @@ module.exports = {
                                                                                 textColor: [0, 0, 0],
                                                                                 fontSize: 10,
                                                                                 halign: "left"
+                                                                            },
+                                                                            didDrawCell: (data) => {
+                                                                                if (
+                                                                                    data.section === 'body' &&
+                                                                                    data.column.index === 1 &&
+                                                                                    data.row.raw?.[0]?.content === 'Report URL'  // ✅ label se identify karo
+                                                                                ) {
+                                                                                    const { x, y, width, height } = data.cell;
+                                                                                    const linkText = "Click here to view";
+
+                                                                                    doc.setFontSize(10);
+                                                                                    doc.setFont("times");
+                                                                                    doc.setTextColor(0, 0, 255);
+
+                                                                                    const textX = x + 2;
+                                                                                    const textY = y + height / 2 + 1.5;
+
+                                                                                    doc.textWithLink(linkText, textX, textY, {
+                                                                                        url: vpReport?.reportUrl
+                                                                                    });
+
+                                                                                    // Underline
+                                                                                    const textWidth = doc.getTextWidth(linkText);
+                                                                                    doc.setDrawColor(0, 0, 255);
+                                                                                    doc.setLineWidth(0.3);
+                                                                                    doc.line(textX, textY + 0.8, textX + textWidth, textY + 0.8);
+
+                                                                                    doc.setTextColor(0, 0, 0);
+                                                                                    doc.setDrawColor(46, 93, 172);
+                                                                                }
                                                                             },
                                                                             bodyStyles: { textColor: [0, 0, 0] },
                                                                             margin: { horizontal: 10 }

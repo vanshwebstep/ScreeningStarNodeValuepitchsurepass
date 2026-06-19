@@ -198,6 +198,13 @@ exports.sendNotification = async (req, res) => {
                       token: newToken,
                     });
                   }
+                  for (const customer of customers.data) {
+                    for (const branch of customer.branches) {
+                      if (Array.isArray(branch.applications)) {
+                        branch.applications.sort((a, b) => a.id - b.id);
+                      }
+                    }
+                  }
 
                   // Process each customer
                   for (const customer of customers.data) {
@@ -239,6 +246,7 @@ exports.sendNotification = async (req, res) => {
                         const extraCC = [
                           { name: 'BGV Team', email: 'bgv@screeningstar.com' },
                           { name: 'QC Team', email: 'qc@screeningstar.com' },
+                          // { name: 'vansh', email: 'vanshwebstep@gmail.com' },
                           { name: 'Manjunath', email: 'manjunath@screeningstar.com' },
                         ]
 

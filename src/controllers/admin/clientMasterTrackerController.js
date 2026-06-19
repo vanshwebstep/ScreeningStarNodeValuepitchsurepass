@@ -183,9 +183,9 @@ exports.listValuePitch  = (req, res) => {
 
 exports.test = async (req, res) => {
   try {
-    const client_application_id = 7366;
-    const client_unique_id = "CL-TEST-001-7";
-    const application_id = "CL-TEST-001-7-6160 ";
+    const client_application_id = 7436;
+    const client_unique_id = "CL-9342";
+    const application_id = "CL-9342-64";
     const branch_id = "171";
     const name = "TESTING ORG";
 
