@@ -962,7 +962,7 @@ module.exports = {
                                                         const previousY = barY + companyBarHeight;
                                                         const startY = previousY + 7;
 
-                                                        if (generate_report_type == 'CONFIDENTIAL BACKGROUND SCREENING REPORT') {
+                                                        if (generate_report_type?.toUpperCase() == 'CONFIDENTIAL BACKGROUND SCREENING REPORT') {
                                                             headerTableData = [
                                                                 ["REFERENCE ID", String(applicationInfo.application_id).toUpperCase(), "DATE OF BIRTH", formatDate(applicationInfo.dob) || "N/A"],
                                                                 ["EMPLOYEE ID", String(applicationInfo.employee_id || "N/A").toUpperCase(), "INSUFF CLEARED", formatDate(applicationInfo.first_insuff_reopened_date, true) || "N/A"],
@@ -970,7 +970,7 @@ module.exports = {
                                                                 // ["VERIFICATION PURPOSE", (applicationInfo.verification_purpose || "EMPLOYMENT").toUpperCase(), "VERIFICATION STATUS", (applicationInfo.final_verification_status || "N/A").toUpperCase()],
                                                                 ["REPORT TYPE", (applicationInfo.report_type || "EMPLOYMENT").replace(/_/g, " ").toUpperCase(), "REPORT STATUS", (applicationInfo.report_status || "N/A").toUpperCase()]
                                                             ];
-                                                        } else if (generate_report_type == 'VENDOR CONFIDENTIAL SCREENING REPORT') {
+                                                        } else if (generate_report_type?.toUpperCase() == 'VENDOR CONFIDENTIAL SCREENING REPORT') {
                                                             headerTableData = [
                                                                 ["REFERENCE ID", String(applicationInfo.application_id).toUpperCase(), "DATE OF INCORPORATION", formatDate(applicationInfo.dob) || "N/A"],
                                                                 ["EMPLOYEE ID", String(applicationInfo.employee_id || "N/A").toUpperCase(), "INSUFF CLEARED", formatDate(applicationInfo.first_insuff_reopened_date, true) || "N/A"],
@@ -1430,7 +1430,7 @@ module.exports = {
                                                                         },
                                                                         {
                                                                             content: (() => {
-                                                                                const serviceType = service?.annexureData.status || service?.service_type ||  "";
+                                                                                const serviceType = service?.annexureData.status || service?.service_type || "";
                                                                                 const serviceTypes = serviceType.split(',').map(s => s.trim().toLowerCase());
                                                                                 console.log('service12121212121', service)
                                                                                 // ================= VALUEPITCH =================

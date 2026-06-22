@@ -3111,16 +3111,23 @@ exports.submitValuePitch = (req, res) => {
 
               console.log("🚀 Calling ValuePitch API...");
               const addCaseResult = await addValuePitchCase(payload);
+              let savedValuePitchResponse = null;
 
               console.log("🚀 API Response:", addCaseResult);
 
               if (addCaseResult?.data?.verifyId) {
+                savedValuePitchResponse = {
+                  ...addCaseResult.data,
+                  valuePitchStatus: addCaseResult.data,
+                  valuePitchReport: null,
+                  valuePitchLastCheckedAt: new Date().toISOString()
+                };
                 console.log("💾 Saving verifyId...");
                 await saveValuePitchStatus({
                   service_id,
                   application_id: currentClientApplication.id,
                   verifyId: addCaseResult.data.verifyId,
-                  response: addCaseResult.data,
+                  response: savedValuePitchResponse,
                 });
 
                 setImmediate(() => {
@@ -3135,6 +3142,9 @@ exports.submitValuePitch = (req, res) => {
                 status: true,
                 message: "ValuePitch annexure submitted successfully.",
                 verifyId: addCaseResult?.data?.verifyId ?? null,
+                valuePitchStatus: savedValuePitchResponse?.valuePitchStatus || addCaseResult?.data || null,
+                valuePitchReport: savedValuePitchResponse?.valuePitchReport || null,
+                screeningstar_response: savedValuePitchResponse || addCaseResult?.data || null,
                 token: newToken,
               });
 
