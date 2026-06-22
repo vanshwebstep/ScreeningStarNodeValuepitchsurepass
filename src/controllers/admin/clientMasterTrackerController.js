@@ -4363,6 +4363,19 @@ exports.annexureDataByServiceIds = (req, res) => {
               valuePitchStatusData = statusRes?.data || null;
               valuePitchReportData = reportRes?.data || null;
 
+              await saveValuePitchStatus({
+                service_id: serviceId,
+                application_id,
+                verifyId: screeningStarData.verifyId,
+                response: {
+                  ...screeningStarData,
+                  ...(valuePitchStatusData || {}),
+                  valuePitchStatus: valuePitchStatusData,
+                  valuePitchReport: valuePitchReportData,
+                  valuePitchLastCheckedAt: new Date().toISOString()
+                }
+              });
+
               screeningStarData = await getValuePitchFromDB(serviceId, application_id);
             } else {
               console.log("⛔ Skipping ValuePitch API call");

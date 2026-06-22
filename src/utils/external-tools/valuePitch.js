@@ -308,7 +308,7 @@ const getValuePitchCheckinStatuses = async (applicationId, serviceIds = []) => {
 
         return rows.reduce((acc, row) => {
             const response = parseValuePitchJson(row.response_json);
-            const statusCode = Number(row.status_code || response.statusCode);
+            const statusCode = Number(row.status_code || response.statusCode || response.valuePitchStatus?.statusCode);
             const statusMsg = response.statusMsg || response.valuePitchStatus?.statusMsg || "";
 
             acc[String(row.service_id)] = {
@@ -316,7 +316,7 @@ const getValuePitchCheckinStatuses = async (applicationId, serviceIds = []) => {
                 statusCode,
                 statusMsg,
                 report: response.report || response.valuePitchReport?.report || null,
-                reportUrl: response.valuePitchReport?.reportUrl || null,
+                reportUrl: response.reportUrl || response.valuePitchReport?.reportUrl || null,
                 responseReceived: Boolean(row.response_json),
                 reportReady: statusCode === 201,
                 mailSentAt: response.valuePitchReadyMailSentAt || null,
