@@ -14,6 +14,7 @@ router.get(
 );
 router.get("/application-by-id", dataManagementController.applicationByID);
 router.put("/submit", dataManagementController.submit);
+router.post("/import-client-data", dataManagementController.importClientData);
 
 router.get(
   "/customer-info",

@@ -7,6 +7,133 @@ const Branch = require("../../models/customer/branch/branchModel");
 const AdminCommon = require("../../models/admin/commonModel");
 const { getClientIpAddress } = require("../../utils/ipAddress");
 
+const DATA_MANAGEMENT_ALLOWED_KEYS = [
+  "month_year",
+  "initiation_date",
+  "client_organization_name",
+  "verification_purpose",
+  "employee_id",
+  "client_organization_code",
+  "client_applicant_name",
+  "contact_number",
+  "contact_number2",
+  "father_name",
+  "dob",
+  "client_applicant_gender",
+  "marital_status",
+  "address",
+  "landmark",
+  "residence_mobile_number",
+  "state",
+  "permanent_address",
+  "permanent_sender_name",
+  "permanent_receiver_name",
+  "permanent_landmark",
+  "permanent_pin_code",
+  "permanent_state",
+  "spouse_name",
+  "Nationality",
+  "QC_Date",
+  "QC_Analyst_Name",
+  "Data_Entry_Analyst_Name",
+  "Date_of_Data",
+  "insuff",
+  "address_house_no",
+  "address_floor",
+  "address_cross",
+  "address_street",
+  "address_main",
+  "address_area",
+  "address_locality",
+  "address_city",
+  "address_landmark",
+  "address_taluk",
+  "address_district",
+  "address_state",
+  "address_pin_code",
+  "permanent_address_house_no",
+  "permanent_address_floor",
+  "permanent_address_cross",
+  "permanent_address_street",
+  "permanent_address_main",
+  "permanent_address_area",
+  "permanent_address_locality",
+  "permanent_address_city",
+  "permanent_address_landmark",
+  "permanent_address_taluk",
+  "permanent_address_district",
+  "permanent_address_state",
+  "permanent_address_pin_code",
+];
+
+function flattenJsonWithAnnexure(jsonObj) {
+  let result = {};
+  let annexureResult = {};
+
+  function recursiveFlatten(obj, isAnnexure = false) {
+    if (!obj || typeof obj !== "object") return;
+
+    for (let key in obj) {
+      if (
+        typeof obj[key] === "object" &&
+        obj[key] !== null &&
+        !Array.isArray(obj[key])
+      ) {
+        if (key === "annexure") {
+          isAnnexure = true;
+          annexureResult = {};
+        }
+        recursiveFlatten(obj[key], isAnnexure);
+        if (isAnnexure && key !== "annexure") {
+          annexureResult[key] = obj[key];
+        }
+      } else {
+        if (!isAnnexure) result[key] = obj[key];
+      }
+    }
+  }
+
+  recursiveFlatten(jsonObj);
+  return { mainJsonRaw: result, annexureRawJson: annexureResult };
+}
+
+function buildDataManagementJson(updatedJson = {}, record = {}) {
+  const { mainJsonRaw } = flattenJsonWithAnnexure(updatedJson);
+  [
+    "client_organization_name",
+    "client_organization_code",
+    "client_applicant_name",
+    "client_applicant_gender",
+  ].forEach((key) => {
+    if (
+      (mainJsonRaw[key] === undefined ||
+        mainJsonRaw[key] === null ||
+        mainJsonRaw[key] === "") &&
+      record[key] !== undefined &&
+      record[key] !== null &&
+      record[key] !== ""
+    ) {
+      mainJsonRaw[key] = record[key];
+    }
+  });
+
+  return Object.keys(mainJsonRaw)
+    .filter((key) => DATA_MANAGEMENT_ALLOWED_KEYS.includes(key))
+    .reduce((obj, key) => {
+      obj[key] = mainJsonRaw[key];
+      return obj;
+    }, {});
+}
+
+function callModel(method, ...args) {
+  return new Promise((resolve, reject) => {
+    method(...args, (err, result) => {
+      if (err) return reject(err);
+      resolve(result);
+    });
+  });
+}
+
 // Controller to list all customers
 exports.list = (req, res) => {
   const { admin_id, _token, filter_status } = req.query;
@@ -844,6 +971,262 @@ exports.submit = (req, res) => {
                 });
             });
         });
+      });
+    });
+  });
+};
+
+exports.importClientData = (req, res) => {
+  const { ipAddress, ipType } = getClientIpAddress(req);
+  const { admin_id, _token, import_name, records } = req.body;
+
+  const missingFields = [];
+  if (!admin_id || admin_id === "") missingFields.push("Admin ID");
+  if (!_token || _token === "") missingFields.push("Token");
+
+  if (missingFields.length > 0) {
+    return res.status(400).json({
+      status: false,
+      message: `Missing required fields: ${missingFields.join(", ")}`,
+    });
+  }
+
+  if (!Array.isArray(records) || records.length === 0) {
+    return res.status(400).json({
+      status: false,
+      message: "records must be a non-empty array.",
+    });
+  }
+
+  const action = "data_management";
+  AdminCommon.isAdminAuthorizedForAction(admin_id, action, (AuthResult) => {
+    if (!AuthResult.status) {
+      return res.status(403).json({
+        status: false,
+        message: "You are not authorized to perform this action.",
+      });
+    }
+
+    AdminCommon.isAdminTokenValid(_token, admin_id, async (err, TokenResult) => {
+      if (err) {
+        console.error("Error verifying token:", err);
+        return res.status(500).json({
+          status: false,
+          message:
+            "An error occurred while verifying the token. Please try again later.",
+        });
+      }
+
+      if (!TokenResult.status) {
+        return res.status(401).json({
+          status: false,
+          message: TokenResult.message,
+        });
+      }
+
+      const newToken = TokenResult.newToken;
+      let importLogId = null;
+      const rowResults = [];
+
+      try {
+        const importLog = await callModel(
+          DataManagement.createClientDataImportLog,
+          {
+            admin_id,
+            import_name: import_name || null,
+            raw_json: {
+              import_name: import_name || null,
+              records,
+            },
+            status: "processing",
+            summary_json: null,
+          }
+        );
+        importLogId = importLog.insertId;
+      } catch (logErr) {
+        console.error("Import log create error:", logErr);
+        return res.status(500).json({
+          status: false,
+          message: "Unable to create import log. Please try again.",
+          token: newToken,
+        });
+      }
+
+      for (let index = 0; index < records.length; index++) {
+        const rowNumber = index + 1;
+        const record = records[index];
+
+        if (!record || typeof record !== "object" || Array.isArray(record)) {
+          rowResults.push({
+            row: rowNumber,
+            status: "failed",
+            message: "Record must be a JSON object.",
+          });
+          continue;
+        }
+
+        const clientApplicationCode =
+          record.client_application_id ||
+          record.application_id ||
+          record.clientApplicationId;
+
+        if (!clientApplicationCode || clientApplicationCode === "") {
+          rowResults.push({
+            row: rowNumber,
+            status: "failed",
+            message: "client_application_id is required.",
+          });
+          continue;
+        }
+
+        if (
+          !record.updated_json ||
+          typeof record.updated_json !== "object" ||
+          Array.isArray(record.updated_json)
+        ) {
+          rowResults.push({
+            row: rowNumber,
+            client_application_id: clientApplicationCode,
+            status: "failed",
+            message: "updated_json must be a JSON object.",
+          });
+          continue;
+        }
+
+        try {
+          const application = await callModel(
+            DataManagement.findClientApplicationForImport,
+            clientApplicationCode
+          );
+
+          if (!application) {
+            rowResults.push({
+              row: rowNumber,
+              client_application_id: clientApplicationCode,
+              status: "failed",
+              message: "Client application id not found.",
+            });
+            continue;
+          }
+
+          const mainJson = buildDataManagementJson(record.updated_json, record);
+
+          if (Object.keys(mainJson).length === 0) {
+            rowResults.push({
+              row: rowNumber,
+              client_application_id: clientApplicationCode,
+              application_id: application.id,
+              status: "failed",
+              message: "No valid data-management fields found in updated_json.",
+            });
+            continue;
+          }
+
+          const clientUpdateData = {};
+          if (record.client_applicant_name) {
+            clientUpdateData.name = record.client_applicant_name;
+          }
+          if (record.client_applicant_gender) {
+            clientUpdateData.gender = record.client_applicant_gender;
+          }
+
+          if (Object.keys(clientUpdateData).length > 0) {
+            await callModel(
+              ClientApplication.updateByData,
+              clientUpdateData,
+              application.id
+            );
+          }
+
+          const basicEntry =
+            record.basic_entry === undefined || record.basic_entry === null
+              ? "1"
+              : record.basic_entry;
+          const dataQc =
+            record.data_qc === undefined || record.data_qc === null
+              ? "0"
+              : record.data_qc;
+
+          await callModel(DataManagement.updateBasicEntry, {
+            application_id: application.id,
+            basic_entry: basicEntry,
+          });
+          await callModel(DataManagement.updateDataQC, {
+            application_id: application.id,
+            data_qc: dataQc,
+          });
+          await callModel(
+            DataManagement.submit,
+            mainJson,
+            application.id,
+            application.branch_id,
+            application.customer_id
+          );
+
+          AdminCommon.adminActivityLog(
+            ipAddress,
+            ipType,
+            admin_id,
+            "Data Management Import",
+            "import",
+            "1",
+            JSON.stringify({
+              client_application_id: clientApplicationCode,
+              application_id: application.id,
+              imported_fields: Object.keys(mainJson),
+            }),
+            null,
+            () => { }
+          );
+
+          rowResults.push({
+            row: rowNumber,
+            client_application_id: clientApplicationCode,
+            application_id: application.id,
+            status: "success",
+            message: "Data management values saved.",
+          });
+        } catch (rowErr) {
+          console.error("Import row error:", rowErr);
+          rowResults.push({
+            row: rowNumber,
+            client_application_id: clientApplicationCode,
+            status: "failed",
+            message: rowErr.message || "Failed to import this record.",
+          });
+        }
+      }
+
+      const imported = rowResults.filter((row) => row.status === "success").length;
+      const failed = rowResults.length - imported;
+      const summary = {
+        total: rowResults.length,
+        imported,
+        failed,
+      };
+
+      try {
+        await callModel(DataManagement.updateClientDataImportLog, importLogId, {
+          status: failed > 0 ? "completed_with_errors" : "completed",
+          summary_json: {
+            ...summary,
+            results: rowResults,
+          },
+        });
+      } catch (logErr) {
+        console.error("Import log update error:", logErr);
+      }
+
+      return res.status(failed === rowResults.length ? 422 : 200).json({
+        status: imported > 0,
+        message:
+          failed > 0
+            ? "Import completed with some failed records."
+            : "Import completed successfully.",
+        import_id: importLogId,
+        summary,
+        results: rowResults,
+        token: newToken,
       });
     });
   });

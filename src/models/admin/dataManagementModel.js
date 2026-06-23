@@ -782,6 +782,92 @@ const Customer = {
 
   },
 
+  findClientApplicationForImport: async (client_application_id, callback) => {
+    try {
+      const sql = `
+        SELECT id, application_id, branch_id, customer_id
+        FROM \`client_applications\`
+        WHERE \`application_id\` = ?
+          AND is_deleted != 1
+        LIMIT 1
+      `;
+
+      const results = await sequelize.query(sql, {
+        replacements: [client_application_id],
+        type: QueryTypes.SELECT,
+      });
+
+      callback(null, results[0] || null);
+    } catch (error) {
+      callback(error, null);
+    }
+  },
+
+  createClientDataImportLog: async (data, callback) => {
+    try {
+      const createTableSql = `
+        CREATE TABLE IF NOT EXISTS \`client_data_import_logs\` (
+          \`id\` bigint(20) NOT NULL AUTO_INCREMENT,
+          \`admin_id\` bigint(20) NOT NULL,
+          \`import_name\` varchar(255) DEFAULT NULL,
+          \`raw_json\` LONGTEXT NOT NULL,
+          \`summary_json\` LONGTEXT DEFAULT NULL,
+          \`status\` varchar(50) NOT NULL DEFAULT 'processing',
+          \`created_at\` timestamp NULL DEFAULT CURRENT_TIMESTAMP,
+          \`updated_at\` timestamp NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+          PRIMARY KEY (\`id\`),
+          KEY \`idx_client_data_import_logs_admin_id\` (\`admin_id\`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+      `;
+
+      await sequelize.query(createTableSql, { type: QueryTypes.RAW });
+
+      const insertSql = `
+        INSERT INTO \`client_data_import_logs\`
+          (\`admin_id\`, \`import_name\`, \`raw_json\`, \`summary_json\`, \`status\`)
+        VALUES (?, ?, ?, ?, ?)
+      `;
+
+      const results = await sequelize.query(insertSql, {
+        replacements: [
+          data.admin_id,
+          data.import_name || null,
+          JSON.stringify(data.raw_json),
+          data.summary_json ? JSON.stringify(data.summary_json) : null,
+          data.status || "processing",
+        ],
+        type: QueryTypes.INSERT,
+      });
+
+      callback(null, { insertId: results[0] });
+    } catch (error) {
+      callback(error, null);
+    }
+  },
+
+  updateClientDataImportLog: async (id, data, callback) => {
+    try {
+      const sql = `
+        UPDATE \`client_data_import_logs\`
+        SET \`summary_json\` = ?, \`status\` = ?
+        WHERE \`id\` = ?
+      `;
+
+      const results = await sequelize.query(sql, {
+        replacements: [
+          data.summary_json ? JSON.stringify(data.summary_json) : null,
+          data.status || "completed",
+          id,
+        ],
+        type: QueryTypes.UPDATE,
+      });
+
+      callback(null, results);
+    } catch (error) {
+      callback(error, null);
+    }
+  },
+
   submit: async (
     mainJson,
     client_application_id,
