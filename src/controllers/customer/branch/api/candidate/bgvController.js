@@ -13,6 +13,8 @@ const {
   createMail,
 } = require("../../../../../mailer/customer/branch/client/createMail");
 const { generatePDF } = require("../../../../../utils/finalReportPdf");
+const { buildReportDetails } = require("../../../../../utils/reportDetailsBuilder");
+const { toSnakeCaseKeys } = require("../../../../../utils/toSnakeCase");
 
 
 const { cdfDataPDF } = require("../../../../../utils/cefDataPDF");
@@ -1313,7 +1315,7 @@ const sendNotificationEmails = (
                       candidateFormPDFName,
                       candidateFormPdfTargetDirectory
                     );
-                     const pdfUrl = candidateFormPDFPath
+                    const pdfUrl = candidateFormPDFPath
                       ? `${imageHost}/${candidateFormPDFPath}`
                       : null;
                     console.log("candidateFormPDFPath - ", candidateFormPDFPath);
@@ -1415,7 +1417,7 @@ const sendNotificationEmails = (
                                 client_application_id: clientApplicationInsertId,
                                 message:
                                   "BGV Form & documents Submitted.",
-                                   bgv_form_pdf: pdfUrl || null,  
+                                bgv_form_pdf: pdfUrl || null,
                               });
                             }
                           );
@@ -1430,7 +1432,7 @@ const sendNotificationEmails = (
                             client_application_id: clientApplicationInsertId,
                             message:
                               "BGV Form & documents Submitted.",
-                               bgv_form_pdf: pdfUrl || null, 
+                            bgv_form_pdf: pdfUrl || null,
                           });
                         });
                     });
@@ -1759,6 +1761,7 @@ exports.fetch_report_status = async (req, res) => {
 
           let finalReportUrl = null;
           let finalReportPath = null;
+          let reportDetails = null;
 
           // Generate PDF only if eligible
           if (["COMPLETED", "QC PENDING"].includes(applicationStatus)) {
@@ -1785,6 +1788,9 @@ exports.fetch_report_status = async (req, res) => {
 
             finalReportPath = pdfPath;
             finalReportUrl = `${imageHost}/${pdfPath}`;
+            reportDetails = await buildReportDetails(application.id, application.branch_id);
+            reportDetails = toSnakeCaseKeys(reportDetails);
+
           }
 
           const responseData = {
@@ -1795,6 +1801,10 @@ exports.fetch_report_status = async (req, res) => {
           // Send report URL only if PDF is ready
           if (finalReportPath && finalReportUrl) {
             responseData.report_url = finalReportUrl;
+          }
+
+          if (reportDetails) {
+            responseData.report_details = reportDetails;
           }
 
           return res.status(200).json({

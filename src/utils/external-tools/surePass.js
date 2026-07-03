@@ -1,6 +1,176 @@
 const axios = require("axios");
 const { sequelize } = require("../../config/db");
 
+const parseSurepassJson = (raw) => {
+    if (!raw) return null;
+    if (typeof raw === "object") return raw;
+
+    try {
+        return JSON.parse(raw);
+    } catch {
+        return null;
+    }
+};
+
+const stableStringify = (value) => {
+    if (Array.isArray(value)) {
+        return `[${value.map(stableStringify).join(",")}]`;
+    }
+
+    if (value && typeof value === "object") {
+        return `{${Object.keys(value)
+            .sort()
+            .map((key) => `${JSON.stringify(key)}:${stableStringify(value[key])}`)
+            .join(",")}}`;
+    }
+
+    return JSON.stringify(value);
+};
+
+const getCachedSurepassStatus = async ({ service_id, application_id, request }) => {
+    const rows = await sequelize.query(
+        `
+            SELECT id, request_json, response_json
+            FROM surepass_status
+            WHERE application_id = :application_id
+            AND service_id = :service_id
+            ORDER BY id DESC
+            LIMIT 1
+        `,
+        {
+            replacements: { service_id, application_id },
+            type: sequelize.QueryTypes.SELECT,
+        }
+    );
+
+    const cached = rows[0] || null;
+    if (!cached?.request_json || !cached?.response_json) return null;
+
+    const cachedRequest = parseSurepassJson(cached.request_json);
+    const cachedResponse = parseSurepassJson(cached.response_json);
+
+    if (!cachedRequest || !cachedResponse) return null;
+
+    return stableStringify(cachedRequest) === stableStringify(request)
+        ? cachedResponse
+        : null;
+};
+
+const formatSurepassKey = (key) =>
+    String(key || "")
+        .replace(/_/g, " ")
+        .replace(/\b\w/g, (char) => char.toUpperCase())
+        .trim();
+
+const formatSurepassValue = (key, value) => {
+    if (value === null || value === undefined || value === "") return "N/A";
+    if (typeof value === "boolean") return value ? "Yes" : "No";
+    if (key === "profile_image") return value ? "Available" : "Not Available";
+    if (Array.isArray(value)) {
+        if (!value.length) return "N/A";
+        return value
+            .map((item) => (typeof item === "object" ? JSON.stringify(item) : String(item)))
+            .join(", ");
+    }
+
+    const text = String(value).replace(/\s+/g, " ").trim();
+    return text.length > 180 ? `${text.slice(0, 177)}...` : text;
+};
+
+const flattenSurepassRows = (obj, prefix = "") => {
+    if (!obj || typeof obj !== "object") return [];
+
+    return Object.entries(obj).flatMap(([key, value]) => {
+        const label = prefix ? `${prefix} ${formatSurepassKey(key)}` : formatSurepassKey(key);
+
+        if (key === "profile_image") {
+            return [[label, formatSurepassValue(key, value)]];
+        }
+
+        if (value && typeof value === "object" && !Array.isArray(value)) {
+            return flattenSurepassRows(value, label);
+        }
+
+        return [[label, formatSurepassValue(key, value)]];
+    });
+};
+
+const getSurepassStatusLabel = (record) => {
+    if (!record) return "PENDING";
+    if (record.status === "data_not_found") return "DATA NOT FOUND";
+    if (record.status === "error") return "ERROR";
+    if (!record.is_prefilled) return "MANAGED BY SUREPASS API";
+
+    const response = parseSurepassJson(record.response_json) || {};
+    const message = String(response.message || "").toLowerCase();
+
+    if (response.success === true && Number(response.status_code) === 200) {
+        return "VERIFIED";
+    }
+
+    if (
+        response.success === false ||
+        Number(response.status_code) >= 400 ||
+        response.errors ||
+        message.includes("verification failed") ||
+        message.includes("invalid")
+    ) {
+        return "FAILED";
+    }
+
+    return "PENDING";
+};
+
+const buildSurepassResultRows = (record) => {
+    const response = parseSurepassJson(record?.response_json);
+    const isPrintableRow = (row) => {
+        if (row.length === 1) return true;
+        const value = String(row[1] || "").trim().toLowerCase();
+        return value && value !== "n/a" && value !== "na" && value !== "null" && value !== "undefined";
+    };
+
+    if (
+        !record ||
+        record.status === "data_not_found" ||
+        record.status === "service_not_in_application" ||
+        !record.is_prefilled ||
+        !response
+    ) {
+        return [];
+    }
+
+    const rows = [
+        ["Status", getSurepassStatusLabel(record)],
+        ["Status Code", formatSurepassValue("status_code", response.status_code)],
+        ["Message", formatSurepassValue("message", response.message)],
+        ["Message Code", formatSurepassKey(response.message_code || "")]
+    ];
+
+    const dataRows = flattenSurepassRows(response.data || {}).filter(isPrintableRow);
+    if (dataRows.length) {
+        rows.push(["Response Data"]);
+        rows.push(...dataRows);
+    }
+
+    return rows.filter(isPrintableRow);
+};
+
+const formatSurepassRecord = (record) => {
+    const responseJson = parseSurepassJson(record?.response_json);
+    const requestJson = parseSurepassJson(record?.request_json);
+    const formattedRecord = {
+        ...record,
+        request_json: requestJson,
+        response_json: responseJson
+    };
+
+    return {
+        ...formattedRecord,
+        surepass_status_label: getSurepassStatusLabel(formattedRecord),
+        surepass_result_rows: buildSurepassResultRows(formattedRecord)
+    };
+};
+
 
 // ✅ SAVE COMMON SUREPASS RESPONSE
 const saveSurepassStatus = async (data) => {
@@ -106,8 +276,8 @@ const getServicesWithPrefill = async ({ service_ids, application_id }) => {
                     is_prefilled = true;
                     status = "exist";
 
-                    request_json = JSON.parse(spData.request);
-                    response_json = JSON.parse(spData.response);
+                    request_json = parseSurepassJson(spData.request);
+                    response_json = parseSurepassJson(spData.response);
                 } else {
                     status = "data_not_found";
                 }
@@ -115,14 +285,14 @@ const getServicesWithPrefill = async ({ service_ids, application_id }) => {
                 status = "service_not_in_application";
             }
 
-            return {
+            return formatSurepassRecord({
                 service_id: cleanId,
                 exists_in_application: existsInApplication,
                 is_prefilled,
                 status,
                 request_json,
                 response_json,
-            };
+            });
         });
 
         return {
@@ -252,7 +422,13 @@ const SUREPASS_SERVICES = {
     mobile_to_uan: {
         endpoint: "/api/v1/income/epfo/find-uan",
         mapPayload: (data) => ({
-            mobile_number: data.mobile_number,
+            mobile_number: data.mobile_number_mobile_to_uan || data.mobile_number
+        }),
+    },
+    uan_pf_screening: {
+        endpoint: "/api/v1/income/epfo/find-uan-list",
+        mapPayload: (data) => ({
+            mobile_number: data.mobile_number_uan_pf_screening,
         }),
     },
     pan_to_current_employment: {
@@ -289,8 +465,13 @@ const SUREPASS_SERVICES = {
     driving_license_check: {
         endpoint: "/api/v1/driving-license/driving-license",
         mapPayload: (data) => ({
-            id_number: data.id_number,
-            dob: data.dob,
+            id_number: data.id_number
+                || data.id_number_driving_license_check
+                || data.identity_number_driving_license_check  // ✅ yeh wala
+                || "",
+            dob: data.dob
+                || data.dob_driving_license_check              // ✅ yeh wala
+                || "",
         }),
     },
     bank_verify: {
@@ -304,6 +485,12 @@ const SUREPASS_SERVICES = {
         endpoint: "/api/v1/aadhaar-validation/aadhaar-validation",
         mapPayload: (data) => ({
             id_number: data.id_number,
+        }),
+    },
+    aadhaar_verification: {
+        endpoint: "/api/v1/aadhaar-validation/aadhaar-validation",
+        mapPayload: (data) => ({
+            id_number: data.id_number_aadhaar_verification || data.identity_number_aadhaar_verification || data.id_number,
         }),
     },
     voter_id_verification: {
@@ -371,7 +558,7 @@ const SUREPASS_SERVICES = {
     pan_comprehensive_plus: {
         endpoint: "/api/v1/pan/pan-comprehensive-plus",
         mapPayload: (data) => ({
-            id_number: data.id_number,
+            id_number: data.id_number || data.id_number_pan_comprehensive_plus || data.pan_number_pan_comprehensive_plus || "",
         }),
     },
     digilocker: {
@@ -473,6 +660,22 @@ const runSurepassService = async ({
         if (service_name === "digilocker") {
             requestToSave = apiPayload;
         }
+
+        const cachedResponse = await getCachedSurepassStatus({
+            service_id,
+            application_id,
+            request: requestToSave
+        });
+
+        if (cachedResponse) {
+            console.log("Surepass cached response found. Skipping external API call.");
+            return {
+                status: true,
+                from_cache: true,
+                data: cachedResponse
+            };
+        }
+
         console.log("🚀 Step: Calling API...");
         const apiRes = await hitSurepassAPI({
             endpoint: service.endpoint,
@@ -520,5 +723,8 @@ const runSurepassService = async ({
 module.exports = {
     runSurepassService,
     getSurepassStatusList,
-    getServicesWithPrefill
+    getServicesWithPrefill,
+    buildSurepassResultRows,
+    formatSurepassRecord,
+    getSurepassStatusLabel
 };

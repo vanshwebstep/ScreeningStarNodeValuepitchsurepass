@@ -23,7 +23,7 @@ const path = require("path");
 const { generatePDF } = require("../../utils/finalReportPdf");
 const { upload, saveImage, saveImages } = require("../../utils/cloudImageSave");
 const { getClientIpAddress } = require("../../utils/ipAddress");
-const { getSurepassStatusList, getServicesWithPrefill } = require("../../utils/external-tools/surePass");
+const { getSurepassStatusList, getServicesWithPrefill,runSurepassService } = require("../../utils/external-tools/surePass");
 const { generateValuePitchToken, addValuePitchCase, fetchValuePitchStatus, fetchValuePitchReportData, getValuePitchFromDB, saveValuePitchStatus, getValuePitchCheckinStatuses } = require("../../utils/external-tools/valuePitch");
 const { runValuePitchReadyPoll } = require("../../cron-jobs/valuePitchReportPolling");
 
@@ -3163,7 +3163,7 @@ exports.submitValuePitch = (req, res) => {
 // ─────────────────────────────────────────────────────────────
 // 2.  SUREPASS
 // ─────────────────────────────────────────────────────────────
-exports.submitSurepass = (req, res) => {
+exports.submitSurepass = async (req, res) => {
   const { ipAddress, ipType } = getClientIpAddress(req);
 
   const {
@@ -3191,7 +3191,7 @@ exports.submitSurepass = (req, res) => {
   AdminCommon.isAdminAuthorizedForAction(admin_id, action, (AuthResult) => {
     if (!AuthResult.status) return res.status(403).json({ status: false, message: AuthResult.message });
 
-    AdminCommon.isAdminTokenValid(_token, admin_id, (err, TokenResult) => {
+    AdminCommon.isAdminTokenValid(_token, admin_id, async (err, TokenResult) => {
       if (err) return res.status(500).json({ status: false, message: err.message });
       if (!TokenResult.status) return res.status(401).json({ status: false, message: TokenResult.message });
 
@@ -3199,8 +3199,21 @@ exports.submitSurepass = (req, res) => {
       const modifiedDbTable = db_table.replace(/-/g, "_").toLowerCase();
       const subJson = annexure[modifiedDbTable] ?? annexure ?? null;
 
+      console.log("📦 modifiedDbTable:", modifiedDbTable);
+      console.log("📦 subJson extracted from annexure:", JSON.stringify(subJson, null, 2));
+
       if (!subJson) {
         return res.status(400).json({ status: false, message: "annexure data is missing or malformed.", token: newToken });
+      }
+
+      // ✅ _ se start hone wale generic tables skip karo
+      if (modifiedDbTable.startsWith("_")) {
+        console.log("⏭️ Skipping generic db_table:", modifiedDbTable);
+        return res.status(200).json({
+          status: true,
+          message: "Generic table — Surepass API skipped.",
+          token: newToken,
+        });
       }
 
       Service.getServiceById(service_id, (err, serviceData) => {
@@ -3222,7 +3235,7 @@ exports.submitSurepass = (req, res) => {
 
           ClientMasterTrackerModel.getCMTAnnexureByApplicationId(
             application_id, modifiedDbTable,
-            (err, currentCMTAnnexure) => {
+            async (err, currentCMTAnnexure) => {
               if (err) {
                 console.error("DB error during CMT Annexure retrieval:", err);
                 return res.status(500).json({ status: false, message: err.message, token: newToken });
@@ -3233,7 +3246,7 @@ exports.submitSurepass = (req, res) => {
               ClientMasterTrackerModel.createOrUpdateAnnexure(
                 cmt_id, application_id, branch_id, customer_id,
                 modifiedDbTable, subJson, types,
-                (err, annexureResult) => {
+                async (err, annexureResult) => {
                   if (err) {
                     console.error("DB error during CMT annexure create/update:", err);
                     AdminCommon.adminActivityLog(
@@ -3250,11 +3263,73 @@ exports.submitSurepass = (req, res) => {
                     JSON.stringify({ application_id, db_table: modifiedDbTable }), null, () => { }
                   );
 
-                  return res.status(200).json({
-                    status: true,
-                    message: "Surepass annexure saved successfully.",
-                    token: newToken,
-                  });
+                  // ✅ Surepass API call
+                  console.log("🚀 Calling runSurepassService...");
+                  console.log("➡️ service_name:", modifiedDbTable);
+                  console.log("➡️ service_id:", service_id);
+                  console.log("➡️ application_id:", application_id);
+                  console.log("➡️ raw_data (subJson):", JSON.stringify(subJson, null, 2));
+
+                  // ✅ DB se latest data fetch karo taaki suffixed fields bhi milein
+                  let enrichedSubJson = subJson;
+                  try {
+                    const dbRow = await new Promise((resolve, reject) => {
+                      ClientMasterTrackerModel.getCMTAnnexureByApplicationId(
+                        application_id, modifiedDbTable,
+                        (err, data) => err ? reject(err) : resolve(data)
+                      );
+                    });
+
+                    if (dbRow && Object.keys(dbRow).length > 0) {
+                      enrichedSubJson = { ...subJson, ...dbRow };
+                      console.log("✅ enrichedSubJson from DB:", JSON.stringify(enrichedSubJson, null, 2));
+                    }
+                  } catch (fetchErr) {
+                    console.warn("⚠️ Could not fetch DB row for enrichment:", fetchErr.message);
+                  }
+
+                  try {
+                    const surepassResult = await runSurepassService({
+                      service_name: modifiedDbTable,
+                      service_id,
+                      application_id,
+                      raw_data: enrichedSubJson  // ✅ DB se aaya fresh data
+                    });
+
+                    console.log("✅ Surepass Result:", JSON.stringify(surepassResult, null, 2));
+
+                    if (!surepassResult.status) {
+                      return res.status(200).json({
+                        status: true,
+                        message: "Annexure saved but Surepass API call failed.",
+                        surepass_error: surepassResult.message || surepassResult.error || null,
+                        token: newToken,
+                      });
+                    }
+
+                    const refreshedSurepass = await getServicesWithPrefill({
+                      service_ids: [service_id],
+                      application_id
+                    });
+                    const screeningstarResponse = refreshedSurepass?.data?.[0] || null;
+
+                    return res.status(200).json({
+                      status: true,
+                      message: "Surepass annexure saved and API called successfully.",
+                      surepass_response: surepassResult?.data || null,
+                      screeningstar_response: screeningstarResponse,
+                      token: newToken,
+                    });
+
+                  } catch (surepassErr) {
+                    console.error("❌ Surepass runService exception:", surepassErr);
+                    return res.status(200).json({
+                      status: true,
+                      message: "Annexure saved but Surepass execution threw an error.",
+                      surepass_error: surepassErr.message,
+                      token: newToken,
+                    });
+                  }
                 }
               );
             }
@@ -3264,7 +3339,6 @@ exports.submitSurepass = (req, res) => {
     });
   });
 };
-
 
 // ─────────────────────────────────────────────────────────────
 // 3.  MANUAL
@@ -4396,11 +4470,14 @@ exports.annexureDataByServiceIds = (req, res) => {
                 const sp = surepassResult.data[0];
 
                 screeningStarData = {
+                  ...sp,
                   service_id: sp.service_id,
                   status: sp.status,
                   is_prefilled: sp.is_prefilled,
                   request_json: sp.request_json,
-                  response_json: sp.response_json
+                  response_json: sp.response_json,
+                  surepass_status_label: sp.surepass_status_label,
+                  surepass_result_rows: sp.surepass_result_rows
                 };
               } else {
                 screeningStarData = {

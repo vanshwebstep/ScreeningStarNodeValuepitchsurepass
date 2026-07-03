@@ -16,7 +16,7 @@ const {
     savePdf,
 } = require("../utils/cloudImageSave");
 const { generateValuePitchToken, addValuePitchCase, fetchValuePitchStatus, fetchValuePitchReportData, getValuePitchFromDB, saveValuePitchStatus } = require("../utils/external-tools/valuePitch");
-const { getSurepassStatusList, getServicesWithPrefill } = require("../utils/external-tools/surePass");
+const { getSurepassStatusList, getServicesWithPrefill, buildSurepassResultRows } = require("../utils/external-tools/surePass");
 
 const { createCanvas, loadImage } = require('canvas');
 
@@ -578,11 +578,14 @@ module.exports = {
                                                     const sp = surepassResult.data[0];
 
                                                     screeningStarData = {
+                                                        ...sp,
                                                         service_id: sp.service_id,
                                                         status: sp.status,
                                                         is_prefilled: sp.is_prefilled,
                                                         request_json: sp.request_json,
-                                                        response_json: sp.response_json
+                                                        response_json: sp.response_json,
+                                                        surepass_status_label: sp.surepass_status_label,
+                                                        surepass_result_rows: sp.surepass_result_rows
                                                     };
                                                 } else {
                                                     screeningStarData = {
@@ -1303,7 +1306,7 @@ module.exports = {
                                                                     }
                                                                     if (serviceTypes.includes("surepass")) {
                                                                         const sp = getSurepassStatus(service);
-                                                                        rawStatus = sp.label;  // ✅ don't return early
+                                                                        rawStatus = annexure.status; ;  // ✅ don't return early
                                                                     }
                                                                     // ================= DEFAULT =================
                                                                     else if (annexure?.status) {
@@ -1430,7 +1433,7 @@ module.exports = {
                                                                         },
                                                                         {
                                                                             content: (() => {
-                                                                                const serviceType = service?.annexureData.status || service?.service_type || "";
+                                                                                const serviceType =  service?.service_type || service?.annexureData.status || "";
                                                                                 const serviceTypes = serviceType.split(',').map(s => s.trim().toLowerCase());
                                                                                 console.log('service12121212121', service)
                                                                                 // ================= VALUEPITCH =================
@@ -1452,10 +1455,10 @@ module.exports = {
                                                                                 // }
 
                                                                                 // ================= SUREPASS =================
-                                                                                if (serviceTypes.includes("surepass")) {
-                                                                                    const sp = getSurepassStatus(service);
-                                                                                    return sp.label;
-                                                                                }
+                                                                                // if (serviceTypes.includes("surepass")) {
+                                                                                //     const sp = getSurepassStatus(service);
+                                                                                //     return sp.label;
+                                                                                // }
 
                                                                                 // ================= DEFAULT =================
                                                                                 return formatStatus(displayText).toUpperCase();
@@ -1495,10 +1498,10 @@ module.exports = {
                                                                                     }
 
                                                                                     // ================= SUREPASS =================
-                                                                                    if (serviceTypes.includes("surepass")) {
-                                                                                        const sp = getSurepassStatus(service);
-                                                                                        return getPdfColor(sp.color); // ✅ RGB color
-                                                                                    }
+                                                                                    // if (serviceTypes.includes("surepass")) {
+                                                                                    //     const sp = getSurepassStatus(service);
+                                                                                    //     return getPdfColor(sp.color); // ✅ RGB color
+                                                                                    // }
 
                                                                                     // ================= DEFAULT =================
                                                                                     return textColorr;
@@ -1753,8 +1756,6 @@ module.exports = {
                                                                     //     }
                                                                     // }
 
-                                                                    // ================= DEFAULT =================
-                                                                    // else {
                                                                     tableData = serviceData
                                                                         .map((data, index) => {
 
@@ -1816,7 +1817,13 @@ module.exports = {
                                                                             return result;
                                                                         })
                                                                         .filter((item) => item !== null);
-                                                                    // }
+
+                                                                    if (serviceTypes.includes("surepass")) {
+                                                                        const surepassRows = buildSurepassResultRows(service?.screeningstar_response);
+                                                                        if (surepassRows.length) {
+                                                                            tableData = tableData.concat([["SurePass Response"]], surepassRows);
+                                                                        }
+                                                                    }
 
                                                                     if (tableData.length > 0) {
 

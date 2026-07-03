@@ -2098,15 +2098,15 @@ const Customer = {
         if (db_table === "driving_license_check" && mainJson.id_number_driving_license_check && mainJson.dob_driving_license_check) {
           console.log("🟢 Surepass driving_license_check Trigger");
 
-          await runSurepassService({
-            service_name: "driving_license_check",
-            service_id: mainJson.service_id,
-            application_id: client_application_id,
-            raw_data: {
-              id_number: mainJson.id_number_driving_license_check,
-              dob: mainJson.dob_driving_license_check
-            }
-          });
+          // await runSurepassService({
+          //   service_name: "driving_license_check",
+          //   service_id: mainJson.service_id,
+          //   application_id: client_application_id,
+          //   raw_data: {
+          //     id_number: mainJson.id_number_driving_license_check,
+          //     dob: mainJson.dob_driving_license_check
+          //   }
+          // });
         }
         if (db_table === "aadhaar_validation" && mainJson.id_number_aadhaar_validation) {
           console.log("🟢 Surepass Aadhaar Trigger", mainJson);
