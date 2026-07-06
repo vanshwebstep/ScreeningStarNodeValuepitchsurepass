@@ -36,6 +36,14 @@ const greenShieldPath = path.join(__dirname, "../assets/images/icons/greenShield
 const greenShieldData = fs.readFileSync(greenShieldPath);
 const greenShield = `data:image/png;base64,${greenShieldData.toString("base64")}`;
 
+const successShieldPath = path.join(__dirname, "../assets/images/icons/successShield.png");
+const successShieldData = fs.readFileSync(successShieldPath);
+const successShield = `data:image/png;base64,${successShieldData.toString("base64")}`;
+
+const failedShieldPath = path.join(__dirname, "../assets/images/icons/failedShield.png");
+const failedShieldData = fs.readFileSync(failedShieldPath);
+const failedShield = `data:image/png;base64,${failedShieldData.toString("base64")}`;
+
 const logo3Path = path.join(__dirname, "../assets/images/icons/3.png");
 const logo3Data = fs.readFileSync(logo3Path);
 const logo3 = `data:image/png;base64,${logo3Data.toString("base64")}`;
@@ -345,6 +353,170 @@ function formatStatus(status) {
     }
 }
 
+const getSurepassPdfRecord = (screeningstarResponse) => {
+    if (!screeningstarResponse) return null;
+    if (!Array.isArray(screeningstarResponse)) return screeningstarResponse;
+    return screeningstarResponse.find((item) => item?.is_prefilled) || screeningstarResponse[0] || null;
+};
+
+const normalizeSurepassPdfCell = (value) => {
+    if (value === null || value === undefined || value === "") return "N/A";
+    return String(value).replace(/\s+/g, " ").trim();
+};
+
+const isPrintableSurepassPdfRow = (row) => {
+    if (!Array.isArray(row) || row.length === 0) return false;
+    if (row.length === 1) return true;
+    const value = normalizeSurepassPdfCell(row[1]).toLowerCase();
+    return value && value !== "n/a" && value !== "na" && value !== "null" && value !== "undefined";
+};
+
+const parseSurepassPdfJson = (value) => {
+    if (!value) return {};
+    if (typeof value === "object") return value;
+    try {
+        return JSON.parse(value);
+    } catch (error) {
+        return {};
+    }
+};
+
+const getSurepassPdfStatusMeta = (record, rows = []) => {
+    const response = parseSurepassPdfJson(record?.response_json);
+    const statusRow = rows.find((row) => Array.isArray(row) && String(row[0] || "").toLowerCase() === "status");
+    const isSuccess = response.success === true && Number(response.status_code) === 200;
+    const isFailed = response.success === false || Number(response.status_code) >= 400;
+    const rawLabel = statusRow?.[1] || record?.surepass_status_label;
+    const fallbackLabel = isSuccess ? "VERIFIED" : isFailed ? "FAILED" : "PENDING";
+    const label = String(rawLabel || fallbackLabel).replace(/_/g, " ").toUpperCase();
+
+    return {
+        isVerified: isSuccess,
+        statusText: isSuccess ? "VERIFIED SUCCESSFULLY" : (isFailed ? "VERIFICATION FAILED" : "VERIFICATION PENDING"),
+        subText: isSuccess ? "The details are valid." : (response.message || "Unable to verify the details."),
+        label,
+        color: isSuccess ? [39, 174, 96] : [220, 53, 69],
+        fill: isSuccess ? [235, 250, 240] : [253, 235, 235],
+        border: isSuccess ? [190, 230, 205] : [245, 200, 200],
+        iconImage: isSuccess ? successShield : failedShield
+    };
+};
+
+const getSurepassPdfDetails = (rows = []) => {
+    const responseDataIndex = rows.findIndex((row) => Array.isArray(row) && row.length === 1 && String(row[0] || "").toLowerCase() === "response data");
+    const sourceRows = responseDataIndex >= 0
+        ? rows.slice(responseDataIndex + 1)
+        : rows.filter((row) => {
+            const label = String(row?.[0] || "").toLowerCase();
+            return !["status", "status code", "message", "message code"].includes(label);
+        });
+
+    return sourceRows
+        .filter((row) => Array.isArray(row) && row.length > 1)
+        .map((row) => {
+            const label = normalizeSurepassPdfCell(row[0]);
+            const rawValue = normalizeSurepassPdfCell(row[1]);
+            const value = rawValue.length > 55 ? `${rawValue.slice(0, 52)}...` : rawValue;
+            return { label, value };
+        });
+};
+
+const drawSurepassVerificationTable = (doc, startY, headingText, record, rowsOverride = null) => {
+    const rowsFromRecord = Array.isArray(record?.surepass_result_rows) ? record.surepass_result_rows : [];
+    const sourceRows = Array.isArray(rowsOverride) ? rowsOverride : (rowsFromRecord.length ? rowsFromRecord : buildSurepassResultRows(record));
+    const surepassRows = sourceRows.filter(isPrintableSurepassPdfRow);
+
+    if (!surepassRows.length) return startY;
+
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const pageHeight = doc.internal.pageSize.getHeight();
+    const margin = 10;
+    const cardWidth = pageWidth - margin * 2;
+    const cardInfo = getSurepassPdfStatusMeta(record, surepassRows);
+    const details = getSurepassPdfDetails(surepassRows);
+    const rowHeight = 6.2;
+    const detailsHeight = details.length ? (details.length * rowHeight + 12) : 0;
+    const badgeHeight = cardInfo.subText ? 16 : 11;
+    const totalHeight = 10 + 18 + 6 + 10 + badgeHeight + 6 + detailsHeight + 8;
+    let yPosition = startY;
+
+    if (yPosition + totalHeight > pageHeight - 20) {
+        doc.addPage();
+        addFooter(doc);
+        yPosition = 10;
+    }
+
+    doc.setDrawColor(225, 225, 225);
+    doc.setLineWidth(0.3);
+    doc.setFillColor(255, 255, 255);
+    doc.roundedRect(margin, yPosition, cardWidth, totalHeight, 3, 3, "FD");
+
+    let innerY = yPosition + 10;
+    const iconSize = 18;
+    doc.addImage(cardInfo.iconImage, "PNG", pageWidth / 2 - iconSize / 2, innerY, iconSize, iconSize);
+    innerY += iconSize + 6;
+
+    doc.setFont("TimesNewRomanBold");
+    doc.setFontSize(13);
+    doc.setTextColor(20, 30, 40);
+    doc.text((headingText || "VERIFICATION").toUpperCase(), pageWidth / 2, innerY, { align: "center" });
+
+    doc.setDrawColor(...cardInfo.color);
+    doc.setLineWidth(0.8);
+    doc.line(pageWidth / 2 - 12, innerY + 2, pageWidth / 2 + 12, innerY + 2);
+
+    innerY += 10;
+
+    doc.setFillColor(...cardInfo.fill);
+    doc.setDrawColor(...cardInfo.border);
+    doc.setLineWidth(0.3);
+    doc.roundedRect(margin + 5, innerY, cardWidth - 10, badgeHeight, 2, 2, "FD");
+
+    const badgeIconSize = 8;
+    doc.addImage(cardInfo.iconImage, "PNG", margin + 10, innerY + badgeHeight / 2 - badgeIconSize / 2, badgeIconSize, badgeIconSize);
+
+    doc.setFont("TimesNewRomanBold");
+    doc.setFontSize(10.5);
+    doc.setTextColor(...cardInfo.color);
+    doc.text(cardInfo.statusText, margin + 22, innerY + (cardInfo.subText ? 7 : badgeHeight / 2 + 1.5));
+
+    if (cardInfo.subText) {
+        doc.setFont("TimesNewRoman");
+        doc.setFontSize(9);
+        doc.setTextColor(90, 90, 90);
+        doc.text(cardInfo.subText, margin + 22, innerY + 12);
+    }
+
+    innerY += badgeHeight + 6;
+
+    if (details.length) {
+        doc.setDrawColor(225, 225, 225);
+        doc.setLineWidth(0.3);
+        doc.roundedRect(margin + 5, innerY, cardWidth - 10, detailsHeight, 2, 2, "D");
+
+        doc.setFont("TimesNewRomanBold");
+        doc.setFontSize(9);
+        doc.setTextColor(...cardInfo.color);
+        doc.text(`${(headingText || "VERIFICATION").toUpperCase()} DETAILS`, margin + 11, innerY + 7);
+
+        let rowY = innerY + 14;
+        details.forEach(({ label, value }) => {
+            doc.setFont("TimesNewRoman");
+            doc.setFontSize(9.5);
+            doc.setTextColor(70, 70, 70);
+            doc.text(label, margin + 11, rowY);
+
+            doc.setFont("TimesNewRomanBold");
+            doc.setTextColor(20, 20, 20);
+            doc.text(":", margin + 65, rowY);
+            doc.text(String(value), margin + 70, rowY);
+
+            rowY += rowHeight;
+        });
+    }
+
+    return yPosition + totalHeight + 10;
+};
 module.exports = {
     generatePDF: async (
         client_applicaton_id,
@@ -1818,12 +1990,14 @@ module.exports = {
                                                                         })
                                                                         .filter((item) => item !== null);
 
-                                                                    if (serviceTypes.includes("surepass")) {
-                                                                        const surepassRows = buildSurepassResultRows(service?.screeningstar_response);
-                                                                        if (surepassRows.length) {
-                                                                            tableData = tableData.concat([["SurePass Response"]], surepassRows);
-                                                                        }
-                                                                    }
+                                                                    const surepassRecord = serviceTypes.includes("surepass")
+                                                                        ? getSurepassPdfRecord(service?.screeningstar_response)
+                                                                        : null;
+                                                                    const surepassRows = surepassRecord
+                                                                        ? (Array.isArray(surepassRecord?.surepass_result_rows) && surepassRecord.surepass_result_rows.length
+                                                                            ? surepassRecord.surepass_result_rows
+                                                                            : buildSurepassResultRows(surepassRecord)).filter(isPrintableSurepassPdfRow)
+                                                                        : [];
 
                                                                     if (tableData.length > 0) {
 
@@ -2054,6 +2228,9 @@ module.exports = {
 
 
                                                                         yPosition = doc.lastAutoTable.finalY + 10;
+                                                                        if (surepassRows.length) {
+                                                                            yPosition = drawSurepassVerificationTable(doc, yPosition, headingText, surepassRecord, surepassRows);
+                                                                        }
 
                                                                         const remarksData = serviceData.find((data) => data.label === "Remarks");
                                                                         const remarks = remarksData?.values?.name;

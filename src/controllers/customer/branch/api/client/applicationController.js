@@ -72,9 +72,7 @@ exports.create = (req, res) => {
             message: `Missing required fields: ${missingFields.join(", ")}`,
         });
     }
-
     const action = "client_manager";
-
     Branch.getBranchAndCustomerByAccessToken(access_token, (err, result) => {
         if (err) {
             console.error("Error:", err);
@@ -187,7 +185,7 @@ exports.create = (req, res) => {
                                 imageHost = appInfo.cloud_host || "www.example.in";
                             }
 
-                           let savedPhotoPath = null;
+                            let savedPhotoPath = null;
                             let savedAttachDocsPaths = [];
                             if (photo) {
                                 const photoTargetDirectory = `uploads/customer/${customerCode}/application/${result.new_application_id}/photo`;
@@ -496,7 +494,7 @@ exports.create = (req, res) => {
                                                                                     .then(() => {
                                                                                         return res.status(201).json({
                                                                                             status: true,
-                                                                                             client_application_id: result.results.insertId,
+                                                                                            client_application_id: result.results.insertId,
                                                                                             message:
                                                                                                 "Client application created successfully and email sent.",
                                                                                             token: access_token,
