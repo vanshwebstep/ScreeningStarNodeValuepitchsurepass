@@ -1137,7 +1137,7 @@ module.exports = {
                                                         const previousY = barY + companyBarHeight;
                                                         const startY = previousY + 7;
 
-                                                        if (generate_report_type?.toUpperCase() == 'CONFIDENTIAL BACKGROUND SCREENING REPORT') {
+                                                        if (String(generate_report_type || '').trim().toUpperCase() == 'CONFIDENTIAL BACKGROUND SCREENING REPORT') {
                                                             headerTableData = [
                                                                 ["REFERENCE ID", String(applicationInfo.application_id).toUpperCase(), "DATE OF BIRTH", formatDate(applicationInfo.dob) || "N/A"],
                                                                 ["EMPLOYEE ID", String(applicationInfo.employee_id || "N/A").toUpperCase(), "INSUFF CLEARED", formatDate(applicationInfo.first_insuff_reopened_date, true) || "N/A"],
@@ -1145,9 +1145,9 @@ module.exports = {
                                                                 // ["VERIFICATION PURPOSE", (applicationInfo.verification_purpose || "EMPLOYMENT").toUpperCase(), "VERIFICATION STATUS", (applicationInfo.final_verification_status || "N/A").toUpperCase()],
                                                                 ["REPORT TYPE", (applicationInfo.report_type || "EMPLOYMENT").replace(/_/g, " ").toUpperCase(), "REPORT STATUS", (applicationInfo.report_status || "N/A").toUpperCase()]
                                                             ];
-                                                        } else if (generate_report_type?.toUpperCase() == 'VENDOR CONFIDENTIAL SCREENING REPORT') {
+                                                        } else if (String(generate_report_type || '').trim().toUpperCase() == 'VENDOR CONFIDENTIAL SCREENING REPORT') {
                                                             headerTableData = [
-                                                                ["REFERENCE ID", String(applicationInfo.application_id).toUpperCase(), "DATE OF INCORPORATION", formatDate(applicationInfo.dob) || "N/A"],
+                                                                ["REFERENCE ID", String(applicationInfo.application_id).toUpperCase(), "DATE OF INCORPORATION", formatDate(applicationInfo.doi) || "N/A"],
                                                                 ["EMPLOYEE ID", String(applicationInfo.employee_id || "N/A").toUpperCase(), "INSUFF CLEARED", formatDate(applicationInfo.first_insuff_reopened_date, true) || "N/A"],
                                                                 ["VERIFICATION INITIATED", formatDate(applicationInfo.initiation_date).toUpperCase() || "N/A", "FINAL REPORT DATE", formatDate(applicationInfo.report_date) || "N/A"],
                                                                 // This row has only 2 cells (spans full row)
@@ -1728,7 +1728,7 @@ module.exports = {
 
                                                         function changeLabel(label, generate_report_type) {
 
-                                                            if (generate_report_type !== 'VENDOR CONFIDENTIAL SCREENING REPORT') {
+                                                            if (String(generate_report_type || '').trim().toUpperCase() !== 'VENDOR CONFIDENTIAL SCREENING REPORT') {
                                                                 return label;
                                                             }
 

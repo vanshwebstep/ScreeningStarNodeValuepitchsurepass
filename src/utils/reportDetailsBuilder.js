@@ -105,7 +105,7 @@ const setUniqueReportKey = (target, preferredKey, value) => {
 
 const changeReportLabel = (label, generateReportType) => {
   if (
-    String(generateReportType || "").toUpperCase() !==
+    String(generateReportType || "").trim().toUpperCase() !==
     "VENDOR CONFIDENTIAL SCREENING REPORT"
   ) {
     return label;
@@ -269,7 +269,7 @@ const fetchSurepassRowsForService = async (serviceInfo, serviceId, clientApplica
 
 const buildReportHeaderDetails = (applicationInfo) => {
   const isVendorReport =
-    String(applicationInfo?.generate_report_type || "").toUpperCase() ===
+    String(applicationInfo?.generate_report_type || "").trim().toUpperCase() ===
     "VENDOR CONFIDENTIAL SCREENING REPORT";
 
   const reportType = upperReportValue(
@@ -282,7 +282,7 @@ const buildReportHeaderDetails = (applicationInfo) => {
           "REFERENCE ID",
           upperReportValue(applicationInfo?.application_id),
           "DATE OF INCORPORATION",
-          formatReportDateValue(applicationInfo?.dob),
+          formatReportDateValue(applicationInfo?.doi),
         ],
         [
           "EMPLOYEE ID",
