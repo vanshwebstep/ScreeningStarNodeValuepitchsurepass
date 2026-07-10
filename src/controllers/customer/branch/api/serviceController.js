@@ -13,7 +13,7 @@ const {
 exports.list = (req, res) => {
     const {
         access_token
-    } = req.query;
+    } = req.body || {};
 
     // Define required fields
     const requiredFields = {

@@ -595,7 +595,7 @@ module.exports = {
                                         console.log("🚀 services:", services);
 
                                         if (!services) {
-                                            return { label: "PENDING", color: "black" };
+                                            return { label: "NOT VERIFIED", color: "gray" };
                                         }
 
                                         // normalize to array
@@ -652,7 +652,7 @@ module.exports = {
 
                                         // ❌ If no prefilled → managed by API
                                         if (!hasPrefilled) {
-                                            return { label: "MANAGED BY SUREPASS API", color: "gray" };
+                                            return { label: "NOT VERIFIED", color: "gray" };
                                         }
 
                                         // ❌ Fail cases (highest priority)
@@ -666,7 +666,7 @@ module.exports = {
                                         }
 
                                         // 🟡 Default fallback
-                                        return { label: "MANAGED BY SUREPASS API", color: "black" };
+                                        return { label: "NOT VERIFIED", color: "gray" };
                                     };
                                     for (const serviceId of serviceIds) {
 

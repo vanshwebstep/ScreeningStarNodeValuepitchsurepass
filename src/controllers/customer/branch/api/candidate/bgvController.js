@@ -1678,10 +1678,20 @@ exports.upload = async (req, res) => {
 
 exports.fetch_report_status = async (req, res) => {
   try {
-    const { client_application_id, branch_id, customer_id } = req.query;
+    const {
+      access_token: bodyAccessToken,
+      _token,
+      client_application_id,
+      branch_id,
+      customer_id,
+    } = req.body || {};
+    const access_token = bodyAccessToken || _token;
 
     const missingFields = [];
 
+    if (!access_token || access_token === "undefined") {
+      missingFields.push("Access Token");
+    }
     if (!client_application_id || client_application_id === "undefined") {
       missingFields.push("Application ID");
     }
@@ -1699,126 +1709,155 @@ exports.fetch_report_status = async (req, res) => {
       });
     }
 
-    ClientApplication.listAllApplications(branch_id, async (err, applications) => {
-      try {
-        if (err) {
-          return res.status(500).json({
-            status: false,
-            message: err.message,
-          });
-        }
+    Branch.getBranchAndCustomerByAccessToken(access_token, (tokenErr, tokenResult) => {
+      if (tokenErr) {
+        console.error("Access token validation error:", tokenErr);
+        return res.status(500).json({
+          status: false,
+          message: "Internal server error. Please try again later.",
+        });
+      }
 
-        if (!applications || applications.length === 0) {
-          return res.status(404).json({
-            status: false,
-            message: "No applications found for this branch.",
-          });
-        }
+      if (!tokenResult.status) {
+        return res.status(401).json({
+          status: false,
+          message: tokenResult.message || "Invalid or expired access token.",
+        });
+      }
 
-        const application = applications.find(
-          (app) =>
-            String(app.id) === String(client_application_id) &&
-            String(app.customer_id) === String(customer_id)
-        );
+      const tokenBranch = tokenResult.data.branch;
+      const tokenCustomer = tokenResult.data.customer;
 
-        if (!application) {
-          return res.status(404).json({
-            status: false,
-            message: "Application does not exist.",
-          });
-        }
+      if (
+        String(tokenBranch.id) !== String(branch_id) ||
+        String(tokenCustomer.id) !== String(customer_id)
+      ) {
+        return res.status(403).json({
+          status: false,
+          message: "Access token does not match the requested branch or customer.",
+        });
+      }
 
-        // ---------------- STATUS LOGIC ----------------
-        let applicationStatus = "NOT READY";
-
-        if (Array.isArray(application.cmtApplications)) {
-          const matchedCmt = application.cmtApplications.find(
-            (cmt) =>
-              String(cmt.cmt_client_application_id) === String(application.id)
-          );
-
-          if (matchedCmt) {
-            if (matchedCmt.cmt_overall_status === "completed") {
-              applicationStatus =
-                matchedCmt.cmt_is_verify === "yes"
-                  ? "COMPLETED"
-                  : "QC PENDING";
-            } else if (matchedCmt.cmt_overall_status === "wip") {
-              applicationStatus = "WIP";
-            }
-          }
-        }
-
-        // ---------------- APP INFO ----------------
-        App.appInfo("backend", async (err, appInfo) => {
+      ClientApplication.listAllApplications(branch_id, async (err, applications) => {
+        try {
           if (err) {
-            console.error("AppInfo error:", err);
             return res.status(500).json({
               status: false,
-              message: "Failed to fetch app configuration",
+              message: err.message,
             });
           }
 
-          let finalReportUrl = null;
-          let finalReportPath = null;
-          let reportDetails = null;
+          if (!applications || applications.length === 0) {
+            return res.status(404).json({
+              status: false,
+              message: "No applications found for this branch.",
+            });
+          }
 
-          // Generate PDF only if eligible
-          if (["COMPLETED", "QC PENDING"].includes(applicationStatus)) {
-            const today = new Date();
-            const formattedDate = `${today.getFullYear()}-${String(
-              today.getMonth() + 1
-            ).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
+          const application = applications.find(
+            (app) =>
+              String(app.id) === String(client_application_id) &&
+              String(app.customer_id) === String(customer_id)
+          );
 
-            const pdfTargetDirectory = `uploads/customers/${application.application_id}/client-applications/${application.application_id}/final-reports`;
+          if (!application) {
+            return res.status(404).json({
+              status: false,
+              message: "Application does not exist.",
+            });
+          }
 
-            const pdfFileName = `${application.name}_${formattedDate}.pdf`
-              .replace(/\s+/g, "-")
-              .toLowerCase();
+          // ---------------- STATUS LOGIC ----------------
+          let applicationStatus = "NOT READY";
 
-            const pdfPath = await generatePDF(
-              application.id,
-              application.branch_id,
-              pdfFileName,
-              pdfTargetDirectory
+          if (Array.isArray(application.cmtApplications)) {
+            const matchedCmt = application.cmtApplications.find(
+              (cmt) =>
+                String(cmt.cmt_client_application_id) === String(application.id)
             );
 
-            const imageHost =
-              (appInfo && appInfo.cloud_host) || "www.example.in";
-
-            finalReportPath = pdfPath;
-            finalReportUrl = `${imageHost}/${pdfPath}`;
-            reportDetails = await buildReportDetails(application.id, application.branch_id);
-            reportDetails = toSnakeCaseKeys(reportDetails);
-
+            if (matchedCmt) {
+              if (matchedCmt.cmt_overall_status === "completed") {
+                applicationStatus =
+                  matchedCmt.cmt_is_verify === "yes"
+                    ? "COMPLETED"
+                    : "QC PENDING";
+              } else if (matchedCmt.cmt_overall_status === "wip") {
+                applicationStatus = "WIP";
+              }
+            }
           }
 
-          const responseData = {
-            application_id: application.id,
-            application_status: applicationStatus,
-          };
+          // ---------------- APP INFO ----------------
+          App.appInfo("backend", async (err, appInfo) => {
+            if (err) {
+              console.error("AppInfo error:", err);
+              return res.status(500).json({
+                status: false,
+                message: "Failed to fetch app configuration",
+              });
+            }
 
-          // Send report URL only if PDF is ready
-          if (finalReportPath && finalReportUrl) {
-            responseData.report_url = finalReportUrl;
-          }
+            let finalReportUrl = null;
+            let finalReportPath = null;
+            let reportDetails = null;
 
-          if (reportDetails) {
-            responseData.report_details = reportDetails;
-          }
+            // Generate PDF only if eligible
+            if (["COMPLETED", "QC PENDING"].includes(applicationStatus)) {
+              const today = new Date();
+              const formattedDate = `${today.getFullYear()}-${String(
+                today.getMonth() + 1
+              ).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
 
-          return res.status(200).json({
-            status: true,
-            data: responseData,
+              const pdfTargetDirectory = `uploads/customers/${application.application_id}/client-applications/${application.application_id}/final-reports`;
+
+              const pdfFileName = `${application.name}_${formattedDate}.pdf`
+                .replace(/\s+/g, "-")
+                .toLowerCase();
+
+              const pdfPath = await generatePDF(
+                application.id,
+                application.branch_id,
+                pdfFileName,
+                pdfTargetDirectory
+              );
+
+              const imageHost =
+                (appInfo && appInfo.cloud_host) || "www.example.in";
+
+              finalReportPath = pdfPath;
+              finalReportUrl = `${imageHost}/${pdfPath}`;
+              reportDetails = await buildReportDetails(application.id, application.branch_id);
+              reportDetails = toSnakeCaseKeys(reportDetails);
+            }
+
+            const responseData = {
+              application_id: application.id,
+              application_status: applicationStatus,
+            };
+
+            // Send report URL only if PDF is ready
+            if (finalReportPath && finalReportUrl) {
+              responseData.report_url = finalReportUrl;
+            }
+
+            if (reportDetails) {
+              responseData.report_details = reportDetails;
+            }
+
+            return res.status(200).json({
+              status: true,
+              data: responseData,
+            });
           });
-        });
-      } catch (innerError) {
-        console.error("Processing error:", innerError);
-        return res.status(500).json({
-          status: false,
-          message: "Something went wrong while processing the application.",
-        });
-      }
+        } catch (innerError) {
+          console.error("Processing error:", innerError);
+          return res.status(500).json({
+            status: false,
+            message: "Something went wrong while processing the application.",
+          });
+        }
+      });
     });
   } catch (error) {
     console.error("Unexpected error:", error);
@@ -1828,10 +1867,3 @@ exports.fetch_report_status = async (req, res) => {
     });
   }
 };
-
-
-
-
-
-
-

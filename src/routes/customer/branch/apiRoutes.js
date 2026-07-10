@@ -12,7 +12,7 @@ app.use(cors());
 // Basic routes
 router.use("/candidate-application", candidateApplicationRoutes);
 router.use("/client-application", clientApplicationRoutes);
-router.get("/services", apiServiceController.list);
+router.post("/services", apiServiceController.list);
 router.use("/bgv-application", BgvRoutes);
 
 

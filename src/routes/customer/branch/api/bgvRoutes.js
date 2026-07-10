@@ -11,6 +11,6 @@ app.use(cors());
 // Basic routes
 router.put("/create", apiBgvController.submit);
 router.post("/upload", apiBgvController.upload);
-router.get("/fetch_report_status", apiBgvController.fetch_report_status);
+router.post("/fetch_report_status", apiBgvController.fetch_report_status);
 
 module.exports = router;

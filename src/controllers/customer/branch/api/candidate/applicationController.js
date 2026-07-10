@@ -16,6 +16,7 @@ const {
 const {
   davMail,
 } = require("../../../../../mailer/customer/branch/candidate/davMail");
+const { candidateFormPDF } = require("../../../../../utils/candidateFormPDF");
 
 exports.create = (req, res) => {
   const {
@@ -397,26 +398,66 @@ exports.create = (req, res) => {
   
 };
 exports.fetch_bgv_pdf = async (req, res) => {
-    const { candidate_application_id, branch_id, customer_id } = req.query;
+  const {
+    access_token: bodyAccessToken,
+    _token,
+    candidate_application_id,
+    branch_id,
+    customer_id,
+  } = req.body || {};
+  const access_token = bodyAccessToken || _token;
 
-    // Validation
-    const missingFields = [];
-    if (!candidate_application_id || candidate_application_id === "undefined")
-      missingFields.push("Candidate Application ID");
-    if (!branch_id || branch_id === "undefined")
-      missingFields.push("Branch ID");
-    if (!customer_id || customer_id === "undefined")
-      missingFields.push("Customer ID");
+  const missingFields = [];
+  if (!access_token || access_token === "undefined") {
+    missingFields.push("Access Token");
+  }
+  if (!candidate_application_id || candidate_application_id === "undefined") {
+    missingFields.push("Candidate Application ID");
+  }
+  if (!branch_id || branch_id === "undefined") {
+    missingFields.push("Branch ID");
+  }
+  if (!customer_id || customer_id === "undefined") {
+    missingFields.push("Customer ID");
+  }
 
-    if (missingFields.length > 0) {
-      return res.status(400).json({
-        status: false,
-        message: `Missing required fields: ${missingFields.join(", ")}`,
-      });
-    }
+  if (missingFields.length > 0) {
+    return res.status(400).json({
+      status: false,
+      message: `Missing required fields: ${missingFields.join(", ")}`,
+    });
+  }
 
-    try {
-      // Step 1: Application exist karti hai ya nahi
+  try {
+    Branch.getBranchAndCustomerByAccessToken(access_token, (tokenErr, tokenResult) => {
+      if (tokenErr) {
+        console.error("Access token validation error:", tokenErr);
+        return res.status(500).json({
+          status: false,
+          message: "Internal server error. Please try again later.",
+        });
+      }
+
+      if (!tokenResult.status) {
+        return res.status(401).json({
+          status: false,
+          message: tokenResult.message || "Invalid or expired access token.",
+        });
+      }
+
+      const tokenBranch = tokenResult.data.branch;
+      const tokenCustomer = tokenResult.data.customer;
+
+      if (
+        String(tokenBranch.id) !== String(branch_id) ||
+        String(tokenCustomer.id) !== String(customer_id)
+      ) {
+        return res.status(403).json({
+          status: false,
+          message: "Access token does not match the requested branch or customer.",
+        });
+      }
+
       Candidate.isApplicationExist(
         candidate_application_id,
         branch_id,
@@ -433,7 +474,6 @@ exports.fetch_bgv_pdf = async (req, res) => {
             });
           }
 
-          // Step 2: Customer info fetch karo (client_unique_id chahiye path ke liye)
           Customer.getCustomerById(customer_id, async (err, currentCustomer) => {
             if (err || !currentCustomer) {
               return res.status(404).json({
@@ -442,7 +482,6 @@ exports.fetch_bgv_pdf = async (req, res) => {
               });
             }
 
-            // Step 3: App info se imageHost lo
             AppModel.appInfo("backend", async (err, appInfo) => {
               if (err) {
                 return res.status(500).json({
@@ -469,7 +508,6 @@ exports.fetch_bgv_pdf = async (req, res) => {
               const targetDirectory = `uploads/customers/${client_unique_id}/candidate-applications/CD-${client_unique_id}-${candidate_application_id}/background-form-reports`;
 
               try {
-                // Step 4: PDF regenerate karo (ya existing serve karo)
                 const pdfPath = await candidateFormPDF(
                   candidate_application_id,
                   branch_id,
@@ -507,11 +545,12 @@ exports.fetch_bgv_pdf = async (req, res) => {
           });
         }
       );
-    } catch (error) {
-      console.error("Unexpected error:", error);
-      return res.status(500).json({
-        status: false,
-        message: "Something went wrong.",
-      });
-    }
-  };
+    });
+  } catch (error) {
+    console.error("Unexpected error:", error);
+    return res.status(500).json({
+      status: false,
+      message: "Something went wrong.",
+    });
+  }
+};

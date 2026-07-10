@@ -825,6 +825,7 @@ exports.submit = (req, res) => {
                                     "contact_number2",
                                     "father_name",
                                     "dob",
+                                    "doi",
                                     "client_applicant_gender",
                                     "marital_status",
                                     "address",
