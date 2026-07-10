@@ -323,7 +323,13 @@ exports.list = (req, res) => {
                 new Promise((resolve) =>
                     Service.list((err, result) => {
                         if (err) return resolve([]);
-                        resolve(result);
+                        resolve(
+                            result.filter((service) =>
+                                service.show_in_vendor_management === true ||
+                                service.show_in_vendor_management === 1 ||
+                                service.show_in_vendor_management === "1"
+                            )
+                        );
                     })
                 )
             ];

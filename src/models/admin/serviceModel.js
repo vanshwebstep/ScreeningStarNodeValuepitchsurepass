@@ -337,6 +337,7 @@ const Service = {
     service_code,
     service_type,
     hsn_code,
+    show_in_vendor_management,
     admin_id,
     callback
   ) => {
@@ -359,8 +360,8 @@ const Service = {
     }
 
     const insertServiceSql = `
-          INSERT INTO \`services\` (\`title\`, \`description\`, \`group_id\`, \`service_code\`, \`service_type\`,  \`hsn_code\`, \`admin_id\`)
-          VALUES (?, ?, ?, ?, ?, ?, ?)
+          INSERT INTO \`services\` (\`title\`, \`description\`, \`group_id\`, \`service_code\`, \`service_type\`,  \`hsn_code\`, \`show_in_vendor_management\`, \`admin_id\`)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         `;
    const formattedServiceType = Array.isArray(service_type)
   ? service_type.filter(Boolean).join(",") // remove empty values
@@ -369,7 +370,7 @@ const Service = {
     : service_type;
 
     const results = await sequelize.query(insertServiceSql, {
-      replacements: [title, description, group_id, service_code, formattedServiceType, hsn_code, admin_id], // Positional replacements using ?
+      replacements: [title, description, group_id, service_code, formattedServiceType, hsn_code, show_in_vendor_management ? 1 : 0, admin_id], // Positional replacements using ?
       type: QueryTypes.INSERT,
     });
     callback(null, results);
@@ -504,6 +505,7 @@ update: async (
   service_type,
   service_code,
   hsn_code,
+  show_in_vendor_management,
   callback
 ) => {
   try {
@@ -522,7 +524,8 @@ const formattedServiceType = Array.isArray(service_type)
         \`group_id\` = ?, 
         \`service_type\` = ?, 
         \`service_code\` = ?, 
-        \`hsn_code\` = ?
+        \`hsn_code\` = ?,
+        \`show_in_vendor_management\` = ?
       WHERE \`id\` = ?
     `;
 
@@ -534,6 +537,7 @@ const formattedServiceType = Array.isArray(service_type)
         formattedServiceType, // 👈 yaha change
         service_code,
         hsn_code,
+        show_in_vendor_management ? 1 : 0,
         id
       ],
       type: QueryTypes.UPDATE,

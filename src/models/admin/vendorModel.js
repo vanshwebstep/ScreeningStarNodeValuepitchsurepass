@@ -1,300 +1,184 @@
-const { pool, startConnection, connectionRelease } = require("../../config/db");
+const { sequelize } = require("../../config/db");
+const { QueryTypes } = require("sequelize");
+
+const parseJson = (value, fallback) => {
+  try {
+    if (value === null || value === undefined || value === "") return fallback;
+    return typeof value === "string" ? JSON.parse(value) : value;
+  } catch {
+    return fallback;
+  }
+};
+
+const normalizeServices = (services) => JSON.stringify(parseJson(services, []));
+const normalizeDetails = (details) => JSON.stringify(parseJson(details, {}));
+
+const publicColumns = `
+  id, admin_id, name_of_organization, vendor_code, registered_address, state, pin_code,
+  gst, tat, agreement_date, email_id, services, vendor_spoc, escalation_manager,
+  authorized_details, created_at, updated_at
+`;
 
 const Vendor = {
-    create: (
-        data,
-        callback
-    ) => {
-        const tableName = "vendors";
-        const columns = Object.keys(data);
-        const values = Object.values(data);
+  create: async (data, callback) => {
+    try {
+      const sql = `
+        INSERT INTO vendor_managements (
+          admin_id, name_of_organization, vendor_code, registered_address, state, pin_code,
+          gst, tat, agreement_date, email_id, password, services,
+          vendor_spoc, escalation_manager, authorized_details
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `;
+      const result = await sequelize.query(sql, {
+        replacements: [
+          data.admin_id,
+          data.name_of_organization,
+          data.vendor_code,
+          data.registered_address,
+          data.state,
+          data.pin_code,
+          data.gst || null,
+          data.tat,
+          data.agreement_date,
+          data.email_id,
+          data.password,
+          normalizeServices(data.services),
+          normalizeDetails(data.vendor_spoc),
+          normalizeDetails(data.escalation_manager),
+          normalizeDetails(data.authorized_details),
+        ],
+        type: QueryTypes.INSERT,
+      });
+      callback(null, { insertId: result[0] });
+    } catch (error) {
+      callback(error, null);
+    }
+  },
 
-        startConnection((err, connection) => {
-            if (err) {
-                console.error("Connection error:", err);
-                return callback(err, null);
-            }
-            // Step 1: Check if the table exists
-            const checkTableSql = `
-                SELECT COUNT(*) AS tableCount
-                FROM information_schema.tables
-                WHERE table_schema = DATABASE() AND table_name = ?
-            `;
-            connection.query(checkTableSql, [tableName], (tableErr, tableResults) => {
-                if (tableErr) {
-                    
-                    console.error("Database query error: 1", tableErr);
-                    return callback(tableErr, null);
-                }
+  update: async (id, data, callback) => {
+    try {
+      const sql = `
+        UPDATE vendor_managements SET
+          name_of_organization = ?, vendor_code = ?, registered_address = ?, state = ?, pin_code = ?,
+          gst = ?, tat = ?, agreement_date = ?, email_id = ?, password = ?, services = ?,
+          vendor_spoc = ?, escalation_manager = ?, authorized_details = ?
+        WHERE id = ? AND (is_deleted IS NULL OR is_deleted != 1)
+      `;
+      const result = await sequelize.query(sql, {
+        replacements: [
+          data.name_of_organization,
+          data.vendor_code,
+          data.registered_address,
+          data.state,
+          data.pin_code,
+          data.gst || null,
+          data.tat,
+          data.agreement_date,
+          data.email_id,
+          data.password,
+          normalizeServices(data.services),
+          normalizeDetails(data.vendor_spoc),
+          normalizeDetails(data.escalation_manager),
+          normalizeDetails(data.authorized_details),
+          id,
+        ],
+        type: QueryTypes.UPDATE,
+      });
+      callback(null, result);
+    } catch (error) {
+      callback(error, null);
+    }
+  },
 
-                const tableExists = tableResults[0].tableCount > 0;
+  list: async (callback) => {
+    try {
+      const rows = await sequelize.query(
+        `SELECT ${publicColumns} FROM vendor_managements WHERE (is_deleted IS NULL OR is_deleted != 1) ORDER BY created_at DESC`,
+        { type: QueryTypes.SELECT }
+      );
+      callback(null, rows);
+    } catch (error) {
+      callback(error, null);
+    }
+  },
 
-                const createTableSql = `CREATE TABLE \`${tableName}\` (
-                    \`id\` int NOT NULL AUTO_INCREMENT,
-                    \`admin_id\` int NOT NULL,
-                    \`created_at\` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                    \`updated_at\` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-                    PRIMARY KEY (\`id\`),
-                    KEY \`${tableName}_fk_admin_id\` (\`admin_id\`),
-                    CONSTRAINT \`${tableName}_fk_admin_id\` FOREIGN KEY (\`admin_id\`) REFERENCES \`admins\` (\`id\`) ON DELETE CASCADE ON UPDATE RESTRICT
-                  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;`;
+  findById: async (id, callback) => {
+    try {
+      const rows = await sequelize.query(
+        `SELECT ${publicColumns}, login_token, token_expiry FROM vendor_managements WHERE id = ? AND (is_deleted IS NULL OR is_deleted != 1) LIMIT 1`,
+        { replacements: [id], type: QueryTypes.SELECT }
+      );
+      callback(null, rows[0] || null);
+    } catch (error) {
+      callback(error, null);
+    }
+  },
 
-                const ensureTable = tableExists
-                    ? Promise.resolve()
-                    : new Promise((resolve, reject) => {
-                        connection.query(createTableSql, (createErr) => {
-                            if (createErr) {
-                                console.error("Error creating table:", createErr);
-                                reject(createErr);
-                            } else {
-                                resolve();
-                            }
-                        });
-                    });
+  findByEmail: async (email, callback) => {
+    try {
+      const rows = await sequelize.query(
+        `SELECT ${publicColumns}, password, login_token, token_expiry, status FROM vendor_managements WHERE LOWER(email_id) = LOWER(?) AND (is_deleted IS NULL OR is_deleted != 1) LIMIT 1`,
+        { replacements: [email], type: QueryTypes.SELECT }
+      );
+      callback(null, rows[0] || null);
+    } catch (error) {
+      callback(error, null);
+    }
+  },
 
-                ensureTable
-                    .then(() => {
-                        // Step 3: Check and add missing columns
-                        const checkColumnsSql = `SHOW COLUMNS FROM \`${tableName}\``;
+  isVendorCodeUsed: async (vendorCode, ignoreId, callback) => {
+    try {
+      const replacements = [vendorCode];
+      let sql = "SELECT COUNT(*) AS count FROM vendor_managements WHERE vendor_code = ? AND (is_deleted IS NULL OR is_deleted != 1)";
+      if (ignoreId) {
+        sql += " AND id != ?";
+        replacements.push(ignoreId);
+      }
+      const rows = await sequelize.query(sql, { replacements, type: QueryTypes.SELECT });
+      callback(null, Number(rows[0]?.count || 0) > 0);
+    } catch (error) {
+      callback(error, null);
+    }
+  },
 
-                        return new Promise((resolve, reject) => {
-                            connection.query(checkColumnsSql, (columnErr, columnResults) => {
-                                if (columnErr) {
-                                    console.error("Error checking columns:", columnErr);
-                                    return reject(columnErr);
-                                }
+  isEmailUsed: async (email, ignoreId, callback) => {
+    try {
+      const replacements = [email];
+      let sql = "SELECT COUNT(*) AS count FROM vendor_managements WHERE LOWER(email_id) = LOWER(?) AND (is_deleted IS NULL OR is_deleted != 1)";
+      if (ignoreId) {
+        sql += " AND id != ?";
+        replacements.push(ignoreId);
+      }
+      const rows = await sequelize.query(sql, { replacements, type: QueryTypes.SELECT });
+      callback(null, Number(rows[0]?.count || 0) > 0);
+    } catch (error) {
+      callback(error, null);
+    }
+  },
 
-                                const existingColumns = columnResults.map((column) => column.Field);
-                                const missingColumns = columns.filter((column) => !existingColumns.includes(column));
-                                const alterTablePromises = missingColumns.map((column) => {
-                                    const alterTableSql = `
-                                        ALTER TABLE \`${tableName}\`
-                                        ADD COLUMN \`${column}\` TEXT
-                                    `;
-                                    return new Promise((resolve, reject) => {
-                                        connection.query(alterTableSql, (alterErr) => {
-                                            if (alterErr) {
-                                                console.error(`Error adding column ${column}:`, alterErr);
-                                                return reject(alterErr);
-                                            }
-                                            resolve();
-                                        });
-                                    });
-                                });
+  updateLoginToken: async (id, token, tokenExpiry, callback) => {
+    try {
+      await sequelize.query(
+        "UPDATE vendor_managements SET login_token = ?, token_expiry = ? WHERE id = ? AND (is_deleted IS NULL OR is_deleted != 1)",
+        { replacements: [token, tokenExpiry, id], type: QueryTypes.UPDATE }
+      );
+      callback(null, true);
+    } catch (error) {
+      callback(error, null);
+    }
+  },
 
-                                Promise.all(alterTablePromises)
-                                    .then(() => resolve())
-                                    .catch((err) => reject(err));
-                            });
-                        });
-                    })
-                    .then(() => {
-                        const insertServiceSql = `
-                            INSERT INTO \`${tableName}\` (${columns.map((col) => `\`${col}\``).join(", ")})
-                            VALUES (${columns.map(() => "?").join(", ")})
-                        `;
-
-                        connection.query(insertServiceSql, values, (insertErr, results) => {
-                             // Release the connection
-                            if (insertErr) {
-                                console.error("Database query error: Insert", insertErr);
-                                return callback(insertErr, null);
-                            }
-                            callback(null, results);
-                        });
-                    })
-                    .catch((err) => {
-                        
-                        console.error("Database query error: Ensure table/columns", err);
-                        callback(err, null);
-                    });
-            });
-        });
-    },
-
-    update: (
-        vendor_id,
-        data,
-        callback
-    ) => {
-        const tableName = "vendors";
-        const columns = Object.keys(data);
-        const values = Object.values(data);
-
-        startConnection((err, connection) => {
-            if (err) {
-                console.error("Connection error:", err);
-                return callback(err, null);
-            }
-
-            // Step 1: Check if the table exists
-            const checkTableSql = `
-                SELECT COUNT(*) AS tableCount
-                FROM information_schema.tables
-                WHERE table_schema = DATABASE() AND table_name = ?
-            `;
-
-            connection.query(checkTableSql, [tableName], (tableErr, tableResults) => {
-                if (tableErr) {
-                    
-                    console.error("Database query error (check table):", tableErr);
-                    return callback(tableErr, null);
-                }
-
-                const tableExists = tableResults[0].tableCount > 0;
-                const createTableSql = `CREATE TABLE \`${tableName}\` (
-                    \`id\` int NOT NULL AUTO_INCREMENT,
-                    \`admin_id\` int NOT NULL,
-                    \`created_at\` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                    \`updated_at\` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-                    PRIMARY KEY (\`id\`),
-                    KEY \`${tableName}_fk_admin_id\` (\`admin_id\`),
-                    CONSTRAINT \`${tableName}_fk_admin_id\` FOREIGN KEY (\`admin_id\`) REFERENCES \`admins\` (\`id\`) ON DELETE CASCADE ON UPDATE RESTRICT
-                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;`;
-
-                const ensureTable = tableExists
-                    ? Promise.resolve()
-                    : new Promise((resolve, reject) => {
-                        connection.query(createTableSql, (createErr) => {
-                            if (createErr) {
-                                console.error("Error creating table:", createErr);
-                                reject(createErr);
-                            } else {
-                                resolve();
-                            }
-                        });
-                    });
-
-                ensureTable
-                    .then(() => {
-                        // Step 2: Check and add missing columns
-                        const checkColumnsSql = `SHOW COLUMNS FROM \`${tableName}\``;
-
-                        return new Promise((resolve, reject) => {
-                            connection.query(checkColumnsSql, (columnErr, columnResults) => {
-                                if (columnErr) {
-                                    console.error("Error checking columns:", columnErr);
-                                    return reject(columnErr);
-                                }
-
-                                const existingColumns = columnResults.map((column) => column.Field);
-                                const missingColumns = columns.filter((column) => !existingColumns.includes(column));
-
-                                const alterTablePromises = missingColumns.map((column) => {
-                                    const alterTableSql = `ALTER TABLE \`${tableName}\` ADD COLUMN \`${column}\` TEXT`;
-
-                                    return new Promise((resolve, reject) => {
-                                        connection.query(alterTableSql, (alterErr) => {
-                                            if (alterErr) {
-                                                console.error(`Error adding column ${column}:`, alterErr);
-                                                return reject(alterErr);
-                                            }
-                                            resolve();
-                                        });
-                                    });
-                                });
-
-                                Promise.all(alterTablePromises)
-                                    .then(() => resolve())
-                                    .catch((err) => reject(err));
-                            });
-                        });
-                    })
-                    .then(() => {
-                        // Step 3: Update data
-                        const updateServiceSql = `
-                            UPDATE \`${tableName}\`
-                            SET ${columns.map((col) => `\`${col}\` = ?`).join(", ")}
-                            WHERE id = ?
-                        `;
-
-                        connection.query(updateServiceSql, [...values, vendor_id], (updateErr, results) => {
-                            
-                            if (updateErr) {
-                                console.error("Database query error (update):", updateErr);
-                                return callback(updateErr, null);
-                            }
-                            callback(null, results);
-                        });
-                    })
-                    .catch((err) => {
-                        
-                        console.error("Database query error (ensure table/columns):", err);
-                        callback(err, null);
-                    });
-            });
-        });
-    },
-
-    findById: (id, callback) => {
-        const sql = `SELECT * FROM \`vendors\` WHERE \`id\` = ?`;
-
-        startConnection((err, connection) => {
-            if (err) {
-                return callback(err, null);
-            }
-
-            connection.query(sql, [id], (queryErr, results) => {
-                 // Release the connection
-
-                if (queryErr) {
-                    console.error("Database query error: 47", queryErr);
-                    return callback(queryErr, null);
-                }
-
-                // If no record is found, return `null`
-                if (!results || results.length === 0) {
-                    return callback(null, null);
-                }
-
-                callback(null, results[0]);
-            });
-        });
-    },
-
-    list: (callback) => {
-        const sql = `SELECT v.*, av.name FROM \`vendors\` v INNER JOIN \`admins\` av ON v.admin_id = av.id`;
-
-        startConnection((err, connection) => {
-            if (err) {
-                return callback(err, null);
-            }
-
-            connection.query(sql, (queryErr, results) => {
-                 // Release the connection
-
-                if (queryErr) {
-                    console.error("Database query error: 47", queryErr);
-                    return callback(queryErr, null);
-                }
-
-                callback(null, results);
-            });
-        });
-    },
-
-    delete: (id, callback) => {
-        const sql = `
-          DELETE FROM \`vendors\`
-          WHERE \`id\` = ?
-        `;
-
-        startConnection((err, connection) => {
-            if (err) {
-                return callback(err, null);
-            }
-
-            connection.query(sql, [id], (queryErr, results) => {
-                 // Release the connection
-
-                if (queryErr) {
-                    console.error("Database query error: 8", queryErr);
-                    return callback(queryErr, null);
-                }
-                callback(null, results);
-            });
-        });
-    },
+  delete: async (id, callback) => {
+    try {
+      const result = await sequelize.query(
+        "UPDATE vendor_managements SET is_deleted = 1, deleted_at = NOW() WHERE id = ? AND (is_deleted IS NULL OR is_deleted != 1)",
+        { replacements: [id], type: QueryTypes.UPDATE }
+      );
+      callback(null, result);
+    } catch (error) {
+      callback(error, null);
+    }
+  },
 };
 
 module.exports = Vendor;
