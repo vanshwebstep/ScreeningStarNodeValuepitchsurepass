@@ -2,7 +2,7 @@ const crypto = require("crypto");
 const Vendor = require("../../models/admin/vendorModel");
 const Common = require("../../models/admin/commonModel");
 const { getClientIpAddress } = require("../../utils/ipAddress");
-const { sendVendorWelcomeMail } = require("../../mailer/admin/vendor-management/welcomeMail");
+const { sendVendorWelcomeMail, sendVendorResetPasswordMail } = require("../../mailer/admin/vendor-management/welcomeMail");
 
 const required = {
   name_of_organization: "Name of Organization",
@@ -199,6 +199,72 @@ exports.login = (req, res) => {
     Vendor.updateLoginToken(vendor.id, token, tokenExpiry, (tokenErr) => {
       if (tokenErr) return res.status(500).json({ status: false, message: tokenErr.message });
       res.json({ status: true, message: "Login successful.", token, vendorData: sanitizeVendor({ ...vendor, login_token: token, token_expiry: tokenExpiry }) });
+    });
+  });
+};
+
+exports.forgotPasswordRequest = (req, res) => {
+  const { email } = req.body;
+  const loginEmail = String(email || "").trim().toLowerCase();
+  const miss = missing({ email: loginEmail }, { email: "Email" });
+  if (miss.length) return res.status(400).json({ status: false, message: `Missing required fields: ${miss.join(", ")}` });
+
+  Vendor.findByEmail(loginEmail, (err, vendor) => {
+    if (err) return res.status(500).json({ status: false, message: err.message });
+    if (!vendor) return res.status(404).json({ status: false, message: "Vendor not found with the provided email." });
+    if (Number(vendor.status) === 0) return res.status(403).json({ status: false, message: "Vendor account is inactive." });
+
+    const token = generateToken();
+    const tokenExpiry = getTokenExpiry();
+    Vendor.updateLoginToken(vendor.id, token, tokenExpiry, (tokenErr) => {
+      if (tokenErr) return res.status(500).json({ status: false, message: tokenErr.message });
+
+      const resetLink = `${frontendBaseUrl(req)}/vendor/reset-password?email=${encodeURIComponent(vendor.email_id)}&token=${token}`;
+      sendVendorResetPasswordMail({
+        vendorName: vendor.name_of_organization,
+        email: vendor.email_id,
+        resetLink,
+      })
+        .then(() => res.json({ status: true, message: `A password reset email has been successfully sent to ${vendor.email_id}.` }))
+        .catch((mailErr) => {
+          console.error("Vendor reset password mail failed:", mailErr.message);
+          if (process.env.NODE_ENV !== "production") {
+            return res.json({
+              status: true,
+              message: "Password reset link generated, but email delivery failed. Use the reset link below for local testing.",
+              resetLink,
+              mailError: mailErr.message,
+            });
+          }
+          res.status(500).json({ status: false, message: "Failed to send password reset email. Please try again later." });
+        });
+    });
+  });
+};
+
+exports.forgotPassword = (req, res) => {
+  const { email, password_token, new_password } = req.body;
+  const loginEmail = String(email || "").trim().toLowerCase();
+  const resetToken = String(password_token || "").trim();
+  const newPassword = String(new_password || "").trim();
+  const miss = missing(
+    { email: loginEmail, password_token: resetToken, new_password: newPassword },
+    { email: "Email", password_token: "Password Token", new_password: "New Password" }
+  );
+  if (miss.length) return res.status(400).json({ status: false, message: `Missing required fields: ${miss.join(", ")}` });
+
+  Vendor.findByEmail(loginEmail, (err, vendor) => {
+    if (err) return res.status(500).json({ status: false, message: err.message });
+    if (!vendor) return res.status(404).json({ status: false, message: "Vendor not found with the provided email." });
+    if (Number(vendor.status) === 0) return res.status(403).json({ status: false, message: "Vendor account is inactive." });
+    if (!vendor.login_token || vendor.login_token !== resetToken) return res.status(401).json({ status: false, message: "Invalid password reset token." });
+    if (vendor.token_expiry && new Date(vendor.token_expiry) < new Date()) {
+      return res.status(401).json({ status: false, message: "Password reset token has expired. Please request a new one." });
+    }
+
+    Vendor.updatePassword(vendor.id, newPassword, (passwordErr) => {
+      if (passwordErr) return res.status(500).json({ status: false, message: passwordErr.message });
+      res.json({ status: true, message: "Password updated successfully." });
     });
   });
 };

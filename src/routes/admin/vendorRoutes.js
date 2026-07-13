@@ -8,5 +8,7 @@ router.put("/update", vendorController.update);
 router.delete("/delete", vendorController.delete);
 router.post("/login", vendorController.login);
 router.post("/verify-login", vendorController.verifyLogin);
+router.post("/forgot-password-request", vendorController.forgotPasswordRequest);
+router.post("/forgot-password", vendorController.forgotPassword);
 
 module.exports = router;
