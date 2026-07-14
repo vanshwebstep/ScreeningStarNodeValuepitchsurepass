@@ -1,6 +1,7 @@
 const crypto = require("crypto");
 const Vendor = require("../../models/admin/vendorModel");
 const Common = require("../../models/admin/commonModel");
+const { upload, saveImage } = require("../../utils/cloudImageSave");
 const { getClientIpAddress } = require("../../utils/ipAddress");
 const { sendVendorWelcomeMail, sendVendorResetPasswordMail } = require("../../mailer/admin/vendor-management/welcomeMail");
 
@@ -82,6 +83,23 @@ const normalizeBody = (body) => ({
   authorized_details: parseJson(body.authorized_details, {}),
 });
 
+
+const validateVendorSession = (vendor_id, _token, res, next) => {
+  const miss = missing({ vendor_id, _token }, { vendor_id: "Vendor ID", _token: "Token" });
+  if (miss.length) return res.status(400).json({ status: false, message: `Missing required fields: ${miss.join(", ")}` });
+
+  Vendor.findById(vendor_id, (err, vendor) => {
+    if (err) return res.status(500).json({ status: false, message: err.message });
+    if (!vendor) return res.status(404).json({ status: false, message: "Vendor not found." });
+    if (String(vendor.login_token || "") !== String(_token || "")) {
+      return res.status(401).json({ status: false, message: "Invalid or expired token." });
+    }
+    if (vendor.token_expiry && new Date(vendor.token_expiry) < new Date()) {
+      return res.status(401).json({ status: false, message: "Token expired." });
+    }
+    next(vendor);
+  });
+};
 const checkVendorUniqueness = (body, ignoreId, newToken, res, next) => {
   Vendor.isVendorCodeUsed(body.vendor_code, ignoreId, (codeErr, codeUsed) => {
     if (codeErr) return res.status(500).json({ status: false, message: codeErr.message, token: newToken });
@@ -152,18 +170,50 @@ exports.update = (req, res) => {
 };
 
 exports.list = (req, res) => {
-  const { admin_id, _token } = req.query;
+  const { admin_id, _token, status } = req.query;
   const miss = missing(req.query, { admin_id: "Admin ID", _token: "Token" });
   if (miss.length) return res.status(400).json({ status: false, message: `Missing required fields: ${miss.join(", ")}` });
 
   validateAdmin(admin_id, _token, "client_overview", res, (newToken) => {
-    Vendor.list((err, vendors) => {
+    Vendor.list(status || "all", (err, vendors) => {
       if (err) return res.status(500).json({ status: false, message: err.message, token: newToken });
       res.json({ status: true, message: "Vendor fetched successfully.", vendors, totalResults: vendors.length, token: newToken });
     });
   });
 };
 
+
+exports.detail = (req, res) => {
+  const { vendor_id, admin_id, _token } = req.query;
+  const miss = missing(req.query, { vendor_id: "Vendor ID", admin_id: "Admin ID", _token: "Token" });
+  if (miss.length) return res.status(400).json({ status: false, message: `Missing required fields: ${miss.join(", ")}` });
+
+  validateAdmin(admin_id, _token, "client_overview", res, (newToken) => {
+    Vendor.findById(vendor_id, (err, vendor) => {
+      if (err) return res.status(500).json({ status: false, message: err.message, token: newToken });
+      if (!vendor) return res.status(404).json({ status: false, message: "Vendor not found.", token: newToken });
+      res.json({ status: true, message: "Vendor fetched successfully.", vendor, token: newToken });
+    });
+  });
+};
+
+exports.updateStatus = (req, res) => {
+  const { ipAddress, ipType } = getClientIpAddress(req);
+  const { vendor_id, vendor_status, admin_id, _token } = req.body;
+  const miss = missing(req.body, { vendor_id: "Vendor ID", vendor_status: "Vendor Status", admin_id: "Admin ID", _token: "Token" });
+  if (miss.length) return res.status(400).json({ status: false, message: `Missing required fields: ${miss.join(", ")}` });
+
+  validateAdmin(admin_id, _token, "client_overview", res, (newToken) => {
+    Vendor.updateStatus(vendor_id, Number(vendor_status) === 1 ? 1 : 0, (err, result) => {
+      if (err) {
+        Common.adminActivityLog(ipAddress, ipType, admin_id, "Vendor", "Status Update", "0", JSON.stringify({ vendor_id, vendor_status }), err, () => {});
+        return res.status(500).json({ status: false, message: err.message, token: newToken });
+      }
+      Common.adminActivityLog(ipAddress, ipType, admin_id, "Vendor", "Status Update", "1", JSON.stringify({ vendor_id, vendor_status }), null, () => {});
+      res.json({ status: true, message: Number(vendor_status) === 1 ? "Vendor activated successfully." : "Vendor inactivated successfully.", result, token: newToken });
+    });
+  });
+};
 exports.delete = (req, res) => {
   const { ipAddress, ipType } = getClientIpAddress(req);
   const { vendor_id, admin_id, _token } = req.query;
@@ -269,6 +319,23 @@ exports.forgotPassword = (req, res) => {
   });
 };
 
+exports.updatePassword = (req, res) => {
+  const { vendor_id, _token } = req.body;
+  const newPassword = String(req.body.new_password || "").trim();
+  const miss = missing(
+    { vendor_id, _token, new_password: newPassword },
+    { vendor_id: "Vendor ID", _token: "Token", new_password: "New Password" }
+  );
+  if (miss.length) return res.status(400).json({ status: false, message: `Missing required fields: ${miss.join(", ")}` });
+
+  validateVendorSession(vendor_id, _token, res, () => {
+    Vendor.updateDashboardPassword(vendor_id, newPassword, (err) => {
+      if (err) return res.status(500).json({ status: false, message: err.message });
+      res.json({ status: true, message: "Password updated successfully.", token: _token });
+    });
+  });
+};
+
 exports.verifyLogin = (req, res) => {
   const { vendor_id, _token } = req.body;
   const miss = missing(req.body, { vendor_id: "Vendor ID", _token: "Token" });
@@ -280,5 +347,82 @@ exports.verifyLogin = (req, res) => {
     if (vendor.login_token !== _token) return res.status(401).json({ status: false, message: "Invalid or expired token." });
     if (vendor.token_expiry && new Date(vendor.token_expiry) < new Date()) return res.status(401).json({ status: false, message: "Token expired." });
     res.json({ status: true, message: "Login verified successful", token: _token, vendorData: sanitizeVendor(vendor) });
+  });
+};
+
+exports.caseList = (req, res) => {
+  const { vendor_id, _token, status } = req.query;
+  validateVendorSession(vendor_id, _token, res, () => {
+    Vendor.listCases(vendor_id, status || "assigned", (err, cases) => {
+      if (err) return res.status(500).json({ status: false, message: err.message });
+      res.json({ status: true, message: "Vendor cases fetched successfully.", cases, totalResults: cases.length, token: _token });
+    });
+  });
+};
+
+exports.acceptCase = (req, res) => {
+  const { vendor_id, _token, client_application_id } = req.body;
+  const miss = missing(req.body, { client_application_id: "Client Application ID" });
+  if (miss.length) return res.status(400).json({ status: false, message: `Missing required fields: ${miss.join(", ")}` });
+
+  validateVendorSession(vendor_id, _token, res, () => {
+    Vendor.acceptCase(vendor_id, client_application_id, (err) => {
+      if (err) return res.status(500).json({ status: false, message: err.message });
+      res.json({ status: true, message: "Case accepted successfully.", token: _token });
+    });
+  });
+};
+
+exports.uploadCaseReport = (req, res) => {
+  const { vendor_id, _token, client_application_id } = req.body;
+  const miss = missing(req.body, { client_application_id: "Client Application ID" });
+  if (miss.length) return res.status(400).json({ status: false, message: `Missing required fields: ${miss.join(", ")}` });
+
+  validateVendorSession(vendor_id, _token, res, async (vendor) => {
+    try {
+      const file = req.files?.image?.[0] || req.files?.pdf?.[0];
+      if (!file) return res.status(400).json({ status: false, message: "Report file is required." });
+
+      const safeVendorCode = String(vendor.vendor_code || vendor.id).replace(/[^a-zA-Z0-9_-]/g, "-");
+      const targetDir = `uploads/vendors/${safeVendorCode}/client-applications/${client_application_id}/reports`;
+      const reportPath = await saveImage(file, targetDir, "vendor-report");
+
+      Vendor.saveCaseReport(vendor_id, client_application_id, reportPath, (err) => {
+        if (err) return res.status(500).json({ status: false, message: err.message });
+        res.json({ status: true, message: "Report uploaded successfully.", report_path: reportPath, token: _token });
+      });
+    } catch (error) {
+      res.status(500).json({ status: false, message: error.message || "Unable to upload report." });
+    }
+  });
+};
+
+exports.updateCaseVerifiedDate = (req, res) => {
+  const { vendor_id, _token, client_application_id, verified_date } = req.body;
+  const miss = missing(req.body, { client_application_id: "Client Application ID" });
+  if (miss.length) return res.status(400).json({ status: false, message: `Missing required fields: ${miss.join(", ")}` });
+
+  validateVendorSession(vendor_id, _token, res, () => {
+    Vendor.updateVerifiedDate(vendor_id, client_application_id, verified_date, (err) => {
+      if (err) return res.status(500).json({ status: false, message: err.message });
+      res.json({ status: true, message: "Verified date updated successfully.", token: _token });
+    });
+  });
+};
+
+exports.completeCase = (req, res) => {
+  const { vendor_id, _token, client_application_id } = req.body;
+  const miss = missing(req.body, { client_application_id: "Client Application ID" });
+  if (miss.length) return res.status(400).json({ status: false, message: `Missing required fields: ${miss.join(", ")}` });
+
+  validateVendorSession(vendor_id, _token, res, () => {
+    Vendor.completeCase(vendor_id, client_application_id, (err, result) => {
+      if (err) return res.status(500).json({ status: false, message: err.message });
+      const affectedRows = Array.isArray(result) ? Number(result[1] || 0) : 0;
+      if (affectedRows === 0) {
+        return res.status(400).json({ status: false, message: "Upload report before completing this case, or case is disabled." });
+      }
+      res.json({ status: true, message: "Case completed successfully.", token: _token });
+    });
   });
 };

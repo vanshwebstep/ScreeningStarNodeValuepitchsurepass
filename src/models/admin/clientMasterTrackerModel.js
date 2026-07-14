@@ -1,12 +1,37 @@
 const crypto = require("crypto");
 const { sequelize } = require("../../config/db");
 const { QueryTypes } = require("sequelize");
+const App = require("../appModel");
 const { runSurepassService } = require("../../utils/external-tools/surePass");
 
 const moment = require("moment");
 // Function to hash the password using MD5
 const hashPassword = (password) =>
   crypto.createHash("md5").update(password).digest("hex");
+
+const normalizeFileHost = (host) => {
+  const cleanHost = String(host || "").trim().replace(/\\/g, "/").replace(/\/+$/, "");
+  if (!cleanHost) return "";
+  return /^https?:\/\//i.test(cleanHost) ? cleanHost : `https://${cleanHost}`;
+};
+
+const buildPublicFileUrl = (filePath, host) => {
+  if (!filePath) return null;
+  const rawPath = String(filePath).trim();
+  if (!rawPath) return null;
+  if (/^https?:\/\//i.test(rawPath)) return rawPath.replace(/\\/g, "/");
+  const cleanPath = rawPath.replace(/\\/g, "/").replace(/^\/+/, "");
+  const baseHost = normalizeFileHost(host) || "http://localhost:5000";
+  return `${baseHost}/${cleanPath}`;
+};
+
+const getBackendFileHost = () =>
+  new Promise((resolve) => {
+    App.appInfo("backend", (err, appInfo) => {
+      if (err) console.error("Error fetching backend app info:", err);
+      resolve((appInfo && (appInfo.cloud_host || appInfo.host)) || "");
+    });
+  });
 
 function calculateDueDate(startDate, tatDays = 0, holidayDates = [], weekendsSet = new Set()) {
   tatDays = parseInt(tatDays, 10);
@@ -370,6 +395,12 @@ const ensureVendorAllocationColumns = async () => {
     vendor_code: "TEXT NULL",
     vendor_allocated_at: "DATETIME NULL",
     vendor_allocated_by: "INT NULL",
+    vendor_case_status: "VARCHAR(50) NULL DEFAULT 'assigned'",
+    vendor_case_enabled: "TINYINT(1) NOT NULL DEFAULT 1",
+    vendor_accepted_at: "DATETIME NULL",
+    vendor_report_path: "TEXT NULL",
+    vendor_report_uploaded_at: "DATETIME NULL",
+    vendor_verified_date: "DATE NULL",
   };
 
   const columnResults = await sequelize.query("SHOW COLUMNS FROM `client_applications`", {
@@ -438,7 +469,13 @@ const Customer = {
         type: QueryTypes.SELECT,
       });
 
-      callback(null, results);
+      const fileHost = await getBackendFileHost();
+      const applications = results.map((row) => ({
+        ...row,
+        vendor_report_url: buildPublicFileUrl(row.vendor_report_path, fileHost),
+      }));
+
+      callback(null, applications);
     } catch (error) {
       callback(error, null);
     }
@@ -455,7 +492,9 @@ const Customer = {
           \`vendor_name\` = ?,
           \`vendor_code\` = ?,
           \`vendor_allocated_at\` = NOW(),
-          \`vendor_allocated_by\` = ?
+          \`vendor_allocated_by\` = ?,
+          \`vendor_case_status\` = 'assigned',
+          \`vendor_case_enabled\` = 1
         WHERE \`id\` = ? AND \`is_deleted\` != 1
       `;
 
@@ -470,6 +509,19 @@ const Customer = {
         type: QueryTypes.UPDATE,
       });
 
+      callback(null, result);
+    } catch (error) {
+      callback(error, null);
+    }
+  },
+
+  updateVendorCaseAccess: async (client_application_id, enabled, callback) => {
+    try {
+      await ensureVendorAllocationColumns();
+      const result = await sequelize.query(
+        `UPDATE \`client_applications\` SET \`vendor_case_enabled\` = ? WHERE \`id\` = ? AND \`is_deleted\` != 1`,
+        { replacements: [enabled ? 1 : 0, client_application_id], type: QueryTypes.UPDATE }
+      );
       callback(null, result);
     } catch (error) {
       callback(error, null);

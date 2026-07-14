@@ -171,6 +171,46 @@ exports.allocateVendor = (req, res) => {
     });
   });
 };
+
+exports.updateVendorCaseAccess = (req, res) => {
+  const { client_application_id, enabled, admin_id, _token } = req.body;
+  const missingFields = [];
+  if (!client_application_id) missingFields.push("Client Application ID");
+  if (enabled === undefined || enabled === null) missingFields.push("Enabled");
+  if (!admin_id) missingFields.push("Admin ID");
+  if (!_token) missingFields.push("Token");
+
+  if (missingFields.length > 0) {
+    return res.status(400).json({
+      status: false,
+      message: `Missing required fields: ${missingFields.join(", ")}`,
+    });
+  }
+
+  AdminCommon.isAdminAuthorizedForAction(admin_id, "admin_manager", (authResult) => {
+    if (!authResult.status) {
+      return res.status(403).json({ status: false, message: authResult.message });
+    }
+
+    AdminCommon.isAdminTokenValid(_token, admin_id, (err, tokenResult) => {
+      if (err) return res.status(500).json({ status: false, message: err.message });
+      if (!tokenResult.status) return res.status(401).json({ status: false, message: tokenResult.message });
+
+      const newToken = tokenResult.newToken;
+      ClientMasterTrackerModel.updateVendorCaseAccess(client_application_id, Number(enabled) === 1 || enabled === true, (updateErr) => {
+        if (updateErr) {
+          return res.status(500).json({ status: false, message: updateErr.message, token: newToken });
+        }
+
+        res.json({
+          status: true,
+          message: Number(enabled) === 1 || enabled === true ? "Vendor case enabled successfully." : "Vendor case disabled successfully.",
+          token: newToken,
+        });
+      });
+    });
+  });
+};
 // Controller to list all customers
 exports.list = (req, res) => {
   const { admin_id, _token, from, to } = req.query;
@@ -4888,6 +4928,7 @@ exports.surePassData = (req, res) => {
     });
   });
 };
+
 
 
 
