@@ -92,6 +92,7 @@ exports.list = (req, res) => {
   });
 };
 
+
 exports.test = async (req, res) => {
   try {
     const candidate_application_id = 128;
@@ -1164,3 +1165,4 @@ exports.sendLink = (req, res) => {
     });
   });
 };
+

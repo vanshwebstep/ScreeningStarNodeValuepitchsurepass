@@ -3,6 +3,8 @@ const router = express.Router();
 const clientMasterTrackerController = require("../../controllers/admin/clientMasterTrackerController");
 
 // Authentication routes
+router.get("/vendor-allocation-list", clientMasterTrackerController.vendorAllocationList);
+router.post("/allocate-vendor", clientMasterTrackerController.allocateVendor);
 router.get("/list", clientMasterTrackerController.list);
 router.get("/list-valuepitch", clientMasterTrackerController.listValuePitch);
 

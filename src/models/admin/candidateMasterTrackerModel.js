@@ -54,8 +54,10 @@ const buildBgvFormPdfUrl = (candidateApp, imageHost) => {
   return `${normalizeHost(imageHost)}/${pdfPath}`;
 };
 
+
 const Customer = {
   list: async (filter_status, callback) => {
+    try {
     let customers_id = [];
 
     if (filter_status && filter_status !== null && filter_status !== "") {
@@ -289,7 +291,9 @@ const Customer = {
         // }
       }
       callback(null, results);
-
+    }
+    } catch (error) {
+      callback(error, null);
     }
 
   },
@@ -1164,3 +1168,9 @@ const Customer = {
 };
 
 module.exports = Customer;
+
+
+
+
+
+

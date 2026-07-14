@@ -5,6 +5,7 @@ const ClientApplication = require("../../models/customer/branch/clientApplicatio
 const Branch = require("../../models/customer/branch/branchModel");
 const AdminCommon = require("../../models/admin/commonModel");
 const Admin = require("../../models/admin/adminModel");
+const Vendor = require("../../models/admin/vendorModel");
 
 const App = require("../../models/appModel");
 const BranchCommon = require("../../models/customer/branch/commonModel");
@@ -27,6 +28,149 @@ const { getSurepassStatusList, getServicesWithPrefill,runSurepassService } = req
 const { generateValuePitchToken, addValuePitchCase, fetchValuePitchStatus, fetchValuePitchReportData, getValuePitchFromDB, saveValuePitchStatus, getValuePitchCheckinStatuses } = require("../../utils/external-tools/valuePitch");
 const { runValuePitchReadyPoll } = require("../../cron-jobs/valuePitchReportPolling");
 
+exports.vendorAllocationList = (req, res) => {
+  const { admin_id, _token } = req.query;
+
+  const missingFields = [];
+  if (!admin_id) missingFields.push("Admin ID");
+  if (!_token) missingFields.push("Token");
+
+  if (missingFields.length > 0) {
+    return res.status(400).json({
+      status: false,
+      message: `Missing required fields: ${missingFields.join(", ")}`,
+    });
+  }
+
+  const action = "admin_manager";
+  AdminCommon.isAdminAuthorizedForAction(admin_id, action, (authResult) => {
+    if (!authResult.status) {
+      return res.status(403).json({
+        status: false,
+        message: authResult.message,
+      });
+    }
+
+    AdminCommon.isAdminTokenValid(_token, admin_id, (err, tokenResult) => {
+      if (err) {
+        console.error("Error checking token validity:", err);
+        return res.status(500).json({ status: false, message: err.message });
+      }
+
+      if (!tokenResult.status) {
+        return res.status(401).json({ status: false, message: tokenResult.message });
+      }
+
+      const newToken = tokenResult.newToken;
+
+      ClientMasterTrackerModel.vendorAllocationList((listErr, applications) => {
+        if (listErr) {
+          console.error("Database error:", listErr);
+          return res.status(500).json({
+            status: false,
+            message: listErr.message || "Unable to fetch vendor allocation cases",
+            token: newToken,
+          });
+        }
+
+        return res.json({
+          status: true,
+          message: "Vendor allocation client cases fetched successfully",
+          data: {
+            applications,
+          },
+          totalResults: {
+            applications: applications.length,
+          },
+          token: newToken,
+        });
+      });
+    });
+  });
+};
+
+exports.allocateVendor = (req, res) => {
+  const { client_application_id, vendor_id, admin_id, _token } = req.body;
+  const applicationId = client_application_id;
+
+  const missingFields = [];
+  if (!applicationId) missingFields.push("Client Application ID");
+  if (!vendor_id) missingFields.push("Vendor ID");
+  if (!admin_id) missingFields.push("Admin ID");
+  if (!_token) missingFields.push("Token");
+
+  if (missingFields.length > 0) {
+    return res.status(400).json({
+      status: false,
+      message: `Missing required fields: ${missingFields.join(", ")}`,
+    });
+  }
+
+  const action = "admin_manager";
+  AdminCommon.isAdminAuthorizedForAction(admin_id, action, (authResult) => {
+    if (!authResult.status) {
+      return res.status(403).json({
+        status: false,
+        message: authResult.message,
+      });
+    }
+
+    AdminCommon.isAdminTokenValid(_token, admin_id, (err, tokenResult) => {
+      if (err) {
+        console.error("Error checking token validity:", err);
+        return res.status(500).json({ status: false, message: err.message });
+      }
+
+      if (!tokenResult.status) {
+        return res.status(401).json({ status: false, message: tokenResult.message });
+      }
+
+      const newToken = tokenResult.newToken;
+
+      Vendor.findById(vendor_id, (vendorErr, vendor) => {
+        if (vendorErr) {
+          console.error("Vendor lookup error:", vendorErr);
+          return res.status(500).json({
+            status: false,
+            message: vendorErr.message || "Unable to validate vendor",
+            token: newToken,
+          });
+        }
+
+        if (!vendor) {
+          return res.status(404).json({
+            status: false,
+            message: "Vendor not found",
+            token: newToken,
+          });
+        }
+
+        ClientMasterTrackerModel.allocateVendor(applicationId, vendor, admin_id, (updateErr) => {
+          if (updateErr) {
+            console.error("Vendor allocation error:", updateErr);
+            return res.status(500).json({
+              status: false,
+              message: updateErr.message || "Unable to allocate vendor",
+              token: newToken,
+            });
+          }
+
+          return res.json({
+            status: true,
+            message: "Vendor allocated successfully",
+            data: {
+              client_application_id: applicationId,
+              vendor_id: vendor.id,
+              vendor_name: vendor.name_of_organization,
+              vendor_code: vendor.vendor_code,
+            },
+            token: newToken,
+          });
+        });
+      });
+    });
+  });
+};
 // Controller to list all customers
 exports.list = (req, res) => {
   const { admin_id, _token, from, to } = req.query;
@@ -4744,3 +4888,6 @@ exports.surePassData = (req, res) => {
     });
   });
 };
+
+
+

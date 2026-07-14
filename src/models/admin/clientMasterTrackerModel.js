@@ -363,7 +363,118 @@ async function reportFormJsonWithannexureData(client_application_id, service_id,
   }
 }
 
+const ensureVendorAllocationColumns = async () => {
+  const requiredColumns = {
+    vendor_id: "INT NULL",
+    vendor_name: "TEXT NULL",
+    vendor_code: "TEXT NULL",
+    vendor_allocated_at: "DATETIME NULL",
+    vendor_allocated_by: "INT NULL",
+  };
+
+  const columnResults = await sequelize.query("SHOW COLUMNS FROM `client_applications`", {
+    type: QueryTypes.SELECT,
+  });
+  const existingColumns = columnResults.map((column) => column.Field);
+
+  for (const [column, definition] of Object.entries(requiredColumns)) {
+    if (!existingColumns.includes(column)) {
+      await sequelize.query(
+        `ALTER TABLE \`client_applications\` ADD COLUMN \`${column}\` ${definition}`,
+        { type: QueryTypes.RAW }
+      );
+    }
+  }
+};
 const Customer = {
+  vendorAllocationList: async (callback) => {
+    try {
+      await ensureVendorAllocationColumns();
+
+      const sql = `
+        SELECT
+          ca.*,
+          ca.id AS main_id,
+          c.name AS customer_name,
+          c.client_unique_id,
+          b.name AS branch_name,
+          cm.tat_days,
+          cm.client_spoc_name,
+          cmt.deadline_date,
+          cmt.first_insuff_reopened_date,
+          cmt.final_verification_status,
+          cmt.dob,
+          cmt.doi,
+          cmt.interim_date,
+          cmt.is_verify,
+          cmt.qc_done_by,
+          cmt.report_date,
+          cmt.case_upload,
+          cmt.report_type,
+          cmt.delay_reason,
+          cmt.report_status,
+          cmt.overall_status,
+          cmt.initiation_date,
+          cmt.report_generate_by,
+          qc_admin.name AS qc_done_by_name,
+          report_admin.name AS report_generated_by_name,
+          GROUP_CONCAT(DISTINCT s.title ORDER BY s.title SEPARATOR ', ') AS service_names
+        FROM \`client_applications\` ca
+        LEFT JOIN \`customers\` c ON c.id = ca.customer_id
+        LEFT JOIN \`customer_metas\` cm ON cm.customer_id = ca.customer_id
+        LEFT JOIN \`branches\` b ON b.id = ca.branch_id
+        LEFT JOIN \`cmt_applications\` cmt ON ca.id = cmt.client_application_id
+        LEFT JOIN \`admins\` AS qc_admin ON qc_admin.id = cmt.qc_done_by
+        LEFT JOIN \`admins\` AS report_admin ON report_admin.id = cmt.report_generate_by
+        LEFT JOIN \`services\` s ON FIND_IN_SET(s.id, ca.services)
+        WHERE ca.\`is_data_qc\` = 1
+          AND ca.\`is_deleted\` != 1
+          AND c.\`is_deleted\` != 1
+        GROUP BY ca.id
+        ORDER BY ca.\`created_at\` DESC, ca.\`is_highlight\` DESC
+      `;
+
+      const results = await sequelize.query(sql, {
+        type: QueryTypes.SELECT,
+      });
+
+      callback(null, results);
+    } catch (error) {
+      callback(error, null);
+    }
+  },
+
+  allocateVendor: async (client_application_id, vendor, admin_id, callback) => {
+    try {
+      await ensureVendorAllocationColumns();
+
+      const sql = `
+        UPDATE \`client_applications\`
+        SET
+          \`vendor_id\` = ?,
+          \`vendor_name\` = ?,
+          \`vendor_code\` = ?,
+          \`vendor_allocated_at\` = NOW(),
+          \`vendor_allocated_by\` = ?
+        WHERE \`id\` = ? AND \`is_deleted\` != 1
+      `;
+
+      const result = await sequelize.query(sql, {
+        replacements: [
+          vendor.id,
+          vendor.name_of_organization,
+          vendor.vendor_code || null,
+          admin_id,
+          client_application_id,
+        ],
+        type: QueryTypes.UPDATE,
+      });
+
+      callback(null, result);
+    } catch (error) {
+      callback(error, null);
+    }
+  },
   list: async (fromDate, toDate, callback) => {
     try {
       // const fromDate = '2025-01-01'; // replace with dynamic input
