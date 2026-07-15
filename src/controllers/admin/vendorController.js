@@ -210,7 +210,7 @@ exports.updateStatus = (req, res) => {
         return res.status(500).json({ status: false, message: err.message, token: newToken });
       }
       Common.adminActivityLog(ipAddress, ipType, admin_id, "Vendor", "Status Update", "1", JSON.stringify({ vendor_id, vendor_status }), null, () => {});
-      res.json({ status: true, message: Number(vendor_status) === 1 ? "Vendor activated successfully." : "Vendor inactivated successfully.", result, token: newToken });
+      res.json({ status: true, message: Number(vendor_status) === 1 ? "Vendor unblocked successfully." : "Vendor Blocked successfully.", result, token: newToken });
     });
   });
 };
