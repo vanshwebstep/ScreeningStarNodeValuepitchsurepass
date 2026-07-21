@@ -6,6 +6,7 @@ const Branch = require("../../models/customer/branch/branchModel");
 const AdminCommon = require("../../models/admin/commonModel");
 const Admin = require("../../models/admin/adminModel");
 const Vendor = require("../../models/admin/vendorModel");
+const { sendVendorAssignedMail, sendVendorBulkAssignedMail } = require("../../mailer/admin/vendor-management/welcomeMail");
 
 const App = require("../../models/appModel");
 const BranchCommon = require("../../models/customer/branch/commonModel");
@@ -28,6 +29,18 @@ const { getSurepassStatusList, getServicesWithPrefill,runSurepassService } = req
 const { generateValuePitchToken, addValuePitchCase, fetchValuePitchStatus, fetchValuePitchReportData, getValuePitchFromDB, saveValuePitchStatus, getValuePitchCheckinStatuses } = require("../../utils/external-tools/valuePitch");
 const { runValuePitchReadyPoll } = require("../../cron-jobs/valuePitchReportPolling");
 
+
+const vendorLoginUrl = (req, email) => `https://dev-screeningstar.netlify.app/vendor-login?email=${encodeURIComponent(email)}`;
+
+const findVendorCaseForMail = (applicationId, vendorId) => new Promise((resolve) => {
+  Vendor.findCaseForMail(applicationId, vendorId, (caseErr, caseInfo) => {
+    if (caseErr) {
+      console.error("Vendor assignment mail case lookup failed:", caseErr.message);
+      return resolve({ application_id: applicationId });
+    }
+    resolve(caseInfo || { application_id: applicationId });
+  });
+});
 exports.vendorAllocationList = (req, res) => {
   const { admin_id, _token } = req.query;
 
@@ -155,6 +168,19 @@ exports.allocateVendor = (req, res) => {
             });
           }
 
+          Vendor.findCaseForMail(applicationId, vendor.id, (caseErr, caseInfo) => {
+            if (caseErr) {
+              console.error("Vendor assignment mail case lookup failed:", caseErr.message);
+            } else {
+              sendVendorAssignedMail({
+                vendorName: vendor.name_of_organization,
+                email: vendor.email_id,
+                caseInfo: caseInfo || { application_id: applicationId },
+                loginUrl: vendorLoginUrl(req, vendor.email_id),
+              }).catch((mailErr) => console.error("Vendor assignment mail failed:", mailErr.message));
+            }
+          });
+
           return res.json({
             status: true,
             message: "Vendor allocated successfully",
@@ -171,7 +197,80 @@ exports.allocateVendor = (req, res) => {
     });
   });
 };
+exports.allocateVendorBulk = (req, res) => {
+  const { client_application_ids, vendor_id, admin_id, _token } = req.body;
+  const applicationIds = Array.isArray(client_application_ids)
+    ? client_application_ids.map((id) => Number(id)).filter(Boolean)
+    : [];
 
+  const missingFields = [];
+  if (!applicationIds.length) missingFields.push("Client Application IDs");
+  if (!vendor_id) missingFields.push("Vendor ID");
+  if (!admin_id) missingFields.push("Admin ID");
+  if (!_token) missingFields.push("Token");
+
+  if (missingFields.length > 0) {
+    return res.status(400).json({
+      status: false,
+      message: `Missing required fields: ${missingFields.join(", ")}`,
+    });
+  }
+
+  const action = "admin_manager";
+  AdminCommon.isAdminAuthorizedForAction(admin_id, action, (authResult) => {
+    if (!authResult.status) {
+      return res.status(403).json({ status: false, message: authResult.message });
+    }
+
+    AdminCommon.isAdminTokenValid(_token, admin_id, (err, tokenResult) => {
+      if (err) return res.status(500).json({ status: false, message: err.message });
+      if (!tokenResult.status) return res.status(401).json({ status: false, message: tokenResult.message });
+
+      const newToken = tokenResult.newToken;
+      Vendor.findById(vendor_id, (vendorErr, vendor) => {
+        if (vendorErr) {
+          return res.status(500).json({ status: false, message: vendorErr.message || "Unable to validate vendor", token: newToken });
+        }
+        if (!vendor) {
+          return res.status(404).json({ status: false, message: "Vendor not found", token: newToken });
+        }
+
+        ClientMasterTrackerModel.allocateVendorBulk(applicationIds, vendor, admin_id, (updateErr, result) => {
+          if (updateErr) {
+            console.error("Bulk vendor allocation error:", updateErr);
+            return res.status(500).json({ status: false, message: updateErr.message || "Unable to allocate vendor", token: newToken });
+          }
+
+          const affectedRows = Array.isArray(result) ? Number(result[1] || 0) : 0;
+          if (affectedRows === 0) {
+            return res.status(400).json({ status: false, message: "No selected cases were allocated.", token: newToken });
+          }
+
+          Promise.all(applicationIds.map((applicationId) => findVendorCaseForMail(applicationId, vendor.id)))
+            .then((cases) => sendVendorBulkAssignedMail({
+              vendorName: vendor.name_of_organization,
+              email: vendor.email_id,
+              cases,
+              loginUrl: vendorLoginUrl(req, vendor.email_id),
+            }))
+            .catch((mailErr) => console.error("Bulk vendor assignment mail failed:", mailErr.message));
+
+          return res.json({
+            status: true,
+            message: `${affectedRows} case(s) allocated successfully`,
+            data: {
+              client_application_ids: applicationIds,
+              vendor_id: vendor.id,
+              vendor_name: vendor.name_of_organization,
+              vendor_code: vendor.vendor_code,
+            },
+            token: newToken,
+          });
+        });
+      });
+    });
+  });
+};
 exports.updateVendorCaseAccess = (req, res) => {
   const { client_application_id, enabled, admin_id, _token } = req.body;
   const missingFields = [];

@@ -3,7 +3,7 @@ const Vendor = require("../../models/admin/vendorModel");
 const Common = require("../../models/admin/commonModel");
 const { upload, saveImage } = require("../../utils/cloudImageSave");
 const { getClientIpAddress } = require("../../utils/ipAddress");
-const { sendVendorWelcomeMail, sendVendorResetPasswordMail } = require("../../mailer/admin/vendor-management/welcomeMail");
+const { sendVendorWelcomeMail, sendVendorResetPasswordMail, sendVendorAcceptedMail, sendVendorCompletedMail } = require("../../mailer/admin/vendor-management/welcomeMail");
 
 const required = {
   name_of_organization: "Name of Organization",
@@ -365,9 +365,26 @@ exports.acceptCase = (req, res) => {
   const miss = missing(req.body, { client_application_id: "Client Application ID" });
   if (miss.length) return res.status(400).json({ status: false, message: `Missing required fields: ${miss.join(", ")}` });
 
-  validateVendorSession(vendor_id, _token, res, () => {
-    Vendor.acceptCase(vendor_id, client_application_id, (err) => {
+  validateVendorSession(vendor_id, _token, res, (vendor) => {
+    Vendor.acceptCase(vendor_id, client_application_id, (err, result) => {
       if (err) return res.status(500).json({ status: false, message: err.message });
+      const affectedRows = Array.isArray(result) ? Number(result[1] || 0) : 0;
+      if (affectedRows === 0) {
+        return res.status(400).json({ status: false, message: "Unable to accept this case, or case is disabled." });
+      }
+
+      Vendor.findCaseForMail(client_application_id, vendor_id, (caseErr, caseInfo) => {
+        if (caseErr) {
+          console.error("Vendor accepted mail case lookup failed:", caseErr.message);
+        } else {
+          sendVendorAcceptedMail({
+            vendorName: vendor.name_of_organization,
+            caseInfo: caseInfo || { application_id: client_application_id },
+            recipients: [caseInfo?.allocated_admin_email].filter(Boolean),
+          }).catch((mailErr) => console.error("Vendor accepted mail failed:", mailErr.message));
+        }
+      });
+
       res.json({ status: true, message: "Case accepted successfully.", token: _token });
     });
   });
@@ -415,13 +432,26 @@ exports.completeCase = (req, res) => {
   const miss = missing(req.body, { client_application_id: "Client Application ID" });
   if (miss.length) return res.status(400).json({ status: false, message: `Missing required fields: ${miss.join(", ")}` });
 
-  validateVendorSession(vendor_id, _token, res, () => {
+  validateVendorSession(vendor_id, _token, res, (vendor) => {
     Vendor.completeCase(vendor_id, client_application_id, (err, result) => {
       if (err) return res.status(500).json({ status: false, message: err.message });
       const affectedRows = Array.isArray(result) ? Number(result[1] || 0) : 0;
       if (affectedRows === 0) {
-        return res.status(400).json({ status: false, message: "Upload report before completing this case, or case is disabled." });
+        return res.status(400).json({ status: false, message: "Upload report and select verified date before completing this case, or case is disabled." });
       }
+
+      Vendor.findCaseForMail(client_application_id, vendor_id, (caseErr, caseInfo) => {
+        if (caseErr) {
+          console.error("Vendor completion mail case lookup failed:", caseErr.message);
+        } else {
+          sendVendorCompletedMail({
+            vendorName: vendor.name_of_organization,
+            caseInfo: caseInfo || { application_id: client_application_id },
+            recipients: [caseInfo?.allocated_admin_email].filter(Boolean),
+          }).catch((mailErr) => console.error("Vendor completion mail failed:", mailErr.message));
+        }
+      });
+
       res.json({ status: true, message: "Case completed successfully.", token: _token });
     });
   });

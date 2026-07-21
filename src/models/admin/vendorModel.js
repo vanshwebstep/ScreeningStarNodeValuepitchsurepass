@@ -80,7 +80,7 @@ const countWorkingDaysAfterStart = (startDate, endDate, holidayDates, weekendsSe
 
 const calculateVendorTat = (row, holidayDates, weekendsSet) => {
   const startDate = toReportMoment(row.initiation_date) || toReportMoment(row.created_at);
-  const reportDate = toReportMoment(row.report_date);
+  const reportDate = toReportMoment(row.vendor_verified_date) || toReportMoment(row.vendor_report_uploaded_at) || toReportMoment(row.report_date);
   if (!startDate || !reportDate) {
     return { tat_elapsed_days: 0, in_tat_days: 0, out_of_tat_days: 0 };
   }
@@ -428,6 +428,56 @@ const Vendor = {
   },
 
 
+  findCaseForMail: async (clientApplicationId, vendorId, callback) => {
+    try {
+      await ensureVendorCaseColumns();
+      const replacements = [clientApplicationId];
+      let vendorFilter = "";
+      if (vendorId) {
+        vendorFilter = " AND ca.vendor_id = ?";
+        replacements.push(vendorId);
+      }
+
+      const rows = await sequelize.query(
+        `SELECT
+           ca.*,
+           ca.id AS main_id,
+           c.name AS customer_name,
+           c.client_unique_id,
+           b.name AS branch_name,
+           cm.tat_days,
+           cm.client_spoc_name,
+           vm.name_of_organization AS vendor_organization_name,
+           vm.email_id AS vendor_email_id,
+           vm.vendor_spoc,
+           allocated_admin.name AS allocated_admin_name,
+           allocated_admin.email AS allocated_admin_email,
+           cmt.initiation_date,
+           cmt.deadline_date,
+           cmt.dob,
+           cmt.report_date,
+           cmt.overall_status,
+           GROUP_CONCAT(DISTINCT s.title ORDER BY s.title SEPARATOR ', ') AS service_names
+         FROM client_applications ca
+         LEFT JOIN customers c ON c.id = ca.customer_id
+         LEFT JOIN branches b ON b.id = ca.branch_id
+         LEFT JOIN customer_metas cm ON cm.customer_id = ca.customer_id
+         LEFT JOIN vendor_managements vm ON vm.id = ca.vendor_id
+         LEFT JOIN admins allocated_admin ON allocated_admin.id = ca.vendor_allocated_by
+         LEFT JOIN cmt_applications cmt ON cmt.client_application_id = ca.id
+         LEFT JOIN services s ON FIND_IN_SET(s.id, ca.services)
+         WHERE ca.id = ?
+           ${vendorFilter}
+           AND ca.is_deleted != 1
+         GROUP BY ca.id
+         LIMIT 1`,
+        { replacements, type: QueryTypes.SELECT }
+      );
+      callback(null, rows[0] || null);
+    } catch (error) {
+      callback(error, null);
+    }
+  },
   listCases: async (vendorId, status, callback) => {
     try {
       await ensureVendorCaseColumns();
@@ -489,7 +539,9 @@ const Vendor = {
            AND vendor_case_enabled = 1
            AND is_deleted != 1
            AND vendor_report_path IS NOT NULL
-           AND TRIM(vendor_report_path) != ''`,
+           AND TRIM(vendor_report_path) != ''
+           AND vendor_verified_date IS NOT NULL
+           AND TRIM(vendor_verified_date) != ''`,
         { replacements: [clientApplicationId, vendorId], type: QueryTypes.UPDATE }
       );
       callback(null, result);

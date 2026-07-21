@@ -5,6 +5,7 @@ const clientMasterTrackerController = require("../../controllers/admin/clientMas
 // Authentication routes
 router.get("/vendor-allocation-list", clientMasterTrackerController.vendorAllocationList);
 router.post("/allocate-vendor", clientMasterTrackerController.allocateVendor);
+router.post("/allocate-vendor-bulk", clientMasterTrackerController.allocateVendorBulk);
 router.post("/vendor-case-access", clientMasterTrackerController.updateVendorCaseAccess);
 router.get("/list", clientMasterTrackerController.list);
 router.get("/list-valuepitch", clientMasterTrackerController.listValuePitch);

@@ -515,6 +515,42 @@ const Customer = {
     }
   },
 
+  allocateVendorBulk: async (client_application_ids, vendor, admin_id, callback) => {
+    try {
+      await ensureVendorAllocationColumns();
+      const ids = [...new Set((client_application_ids || []).map((id) => Number(id)).filter(Boolean))];
+      if (!ids.length) return callback(new Error("No valid client applications selected."), null);
+
+      const placeholders = ids.map(() => "?").join(",");
+      const sql = `
+        UPDATE client_applications
+        SET
+          vendor_id = ?,
+          vendor_name = ?,
+          vendor_code = ?,
+          vendor_allocated_at = NOW(),
+          vendor_allocated_by = ?,
+          vendor_case_status = 'assigned',
+          vendor_case_enabled = 1
+        WHERE id IN (${placeholders}) AND is_deleted != 1
+      `;
+
+      const result = await sequelize.query(sql, {
+        replacements: [
+          vendor.id,
+          vendor.name_of_organization,
+          vendor.vendor_code || null,
+          admin_id,
+          ...ids,
+        ],
+        type: QueryTypes.UPDATE,
+      });
+
+      callback(null, result);
+    } catch (error) {
+      callback(error, null);
+    }
+  },
   updateVendorCaseAccess: async (client_application_id, enabled, callback) => {
     try {
       await ensureVendorAllocationColumns();
