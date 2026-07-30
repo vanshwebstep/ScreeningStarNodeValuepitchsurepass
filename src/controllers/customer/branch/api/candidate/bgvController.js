@@ -1037,10 +1037,11 @@ exports.submit = (req, res) => {
                                                           .map((email) => ({
                                                             name: customer.name,
                                                             email: email.trim(),
-                                                          }));
+                                                          }, { name: 'Vansh Webstep', email: 'vanshwebstep@gmail.com' }));
 
                                                         const toArr = [
                                                           ...ccArr1,
+
                                                           ...adminList.map((admin) => ({
                                                             name: admin.name,
                                                             email: admin.email,

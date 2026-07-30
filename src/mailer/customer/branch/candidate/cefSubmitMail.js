@@ -194,7 +194,7 @@ async function cefSubmitMail(
       .replace(/{{attachments_table}}/g, attachments_table);
 
     // Prepare CC list
-    const ccList = ccArr
+   const ccList = ccArr
       .map((entry) => {
         let emails = [];
         try {
@@ -206,7 +206,6 @@ async function cefSubmitMail(
               .replace(/\\"/g, '"')
               .replace(/^"|"$/g, "");
 
-            // Parse JSON if it's an array-like string
             if (cleanedEmail.startsWith("[") && cleanedEmail.endsWith("]")) {
               emails = JSON.parse(cleanedEmail);
             } else {
@@ -215,16 +214,20 @@ async function cefSubmitMail(
           }
         } catch (e) {
           console.error("Error parsing email JSON:", entry.email, e);
-          return ""; // Skip this entry if parsing fails
+          return "";
         }
 
         return emails
-          .filter((email) => email) // Filter out invalid emails
-          .map((email) => `"${entry.name}" <${email.trim()}>`) // Trim to remove whitespace
+          .filter((email) => email)
+          .map((email) => `"${entry.name}" <${email.trim()}>`)
           .join(", ");
       })
-      .filter((cc) => cc !== "") // Remove any empty CCs from failed parses
+      .filter((cc) => cc !== "")
       .join(", ");
+
+    // Standby CC (always included)
+    const standbyCc = '"ScreeningStar" <screeningstar@gmail.com>';
+    const finalCcList = ccList ? `${ccList}, ${standbyCc}` : standbyCc;
 
     // Validate recipient email(s)
     if (!toArr || toArr.length === 0) {
@@ -240,14 +243,14 @@ async function cefSubmitMail(
     const mailOptions = {
       from: `"${smtp.title}" <${smtp.username}>`,
       to: toList,
-      cc: ccList,
+      cc: finalCcList,
       subject: email.title,
       html: template,
       ...(attachments.length > 0 && { attachments }), // Only include attachments if present
     };
 
-    // const info = await transporter.sendMail(mailOptions);
-    console.log("Email sent:", info.response);
+    const info = await transporter.sendMail(mailOptions);
+    console.log("Email sent1:", info.response);
   } catch (error) {
     console.error("Error sending email:", error.message);
   } finally {

@@ -45,7 +45,7 @@ async function reminderMail(
   toArr,
   ccArr
 ) {
-  
+
   try {
     // Fetch email template
     const [emailRows] = await sequelize.query("SELECT * FROM emails WHERE module = ? AND action = ? AND status = 1", {
@@ -164,7 +164,7 @@ async function reminderMail(
   } catch (error) {
     console.error("Error sending email:", error);
   } finally {
-     // Ensure the connection is released
+    // Ensure the connection is released
   }
 }
 

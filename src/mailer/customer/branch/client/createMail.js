@@ -155,20 +155,20 @@ async function createMail(
     let emailTitle = email.title.replace(/{{application_id}}/g, application_id);
 
     // Send email
-    // const info = await transporter.sendMail({
-    //   from: `"${smtp.title}" <${smtp.username}>`,
-    //   to: toList, // Main recipient list
-    //   cc: ccList, // CC recipient list
-    //   bcc: [
-    //     // '"Rohit Webstep" <rohitwebstep@gmail.com>',
-    //     '"ScreeningStar" <screeningstar@gmail.com>',
-    //     // '"Vansh Webstep" <vanshwebstep@gmail.com>'
-    //   ],
-    //   subject: emailTitle,
-    //   html: template,
-    // });
+    const info = await transporter.sendMail({
+      from: `"${smtp.title}" <${smtp.username}>`,
+      to: toList, // Main recipient list
+      cc: ccList, // CC recipient list
+      bcc: [
+        // '"Rohit Webstep" <rohitwebstep@gmail.com>',
+        // '"ScreeningStar" <screeningstar@gmail.com>',
+        '"Vansh Webstep" <vanshwebstep@gmail.com>'
+      ],
+      subject: emailTitle,
+      html: template,
+    });
 
-    console.log("Email sent:", info.response);
+    console.log("Email sent2:", info.response);
   } catch (error) {
     console.error("Error sending email:", error);
   } finally {
