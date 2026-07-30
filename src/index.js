@@ -1,10 +1,39 @@
 const express = require("express");
 const bodyParser = require("body-parser");
+const fs = require("fs");
+const path = require("path");
 const cors = require("cors");
 require("dotenv").config(); // Ensure you load environment variables
+const router = express.Router();
+const multer = require("multer");
+
+
+
+
+
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    const dir = "uploads"; // Original upload directory
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true }); // Create directory if it doesn't exist
+    }
+    cb(null, dir);
+  },
+  filename: (req, file, cb) => {
+    const timestamp = Date.now();
+    const randomNumber = Math.floor(Math.random() * 10000); // Random number
+    const extension = path.extname(file.originalname); // Get the file extension
+    const filename = `${timestamp}_${randomNumber}${extension}`; // Create filename
+    cb(null, filename); // Return the filename
+  },
+});
+const upload = multer({ storage: storage });
 
 // Import routes
 const utilsRoutes = require("./routes/utilsRoutes");
+const casevendoradmin = require("./routes/admin/caseServiceAllocation");
+const casevendor = require("./routes/vendor/caseServiceAllocation");
+
 const adminRoutes = require("./routes/admin/indexRoutes");
 const vendorRoutes = require("./routes/admin/vendorRoutes");
 const ticketRoutes = require("./routes/admin/ticketRoutes");
@@ -43,6 +72,7 @@ const documentCheckInTrackerRoutes = require("./routes/admin/documentCheckInTrac
 const candidateMasterTrackerRoutes = require("./routes/admin/candidateMasterTrackerRoutes");
 const expenseTrackerRoutes = require("./routes/admin/expenseTrackerRoutes");
 const { startValuePitchReportPolling } = require("./cron-jobs/valuePitchReportPolling");
+const csa = require("./controllers/admin/caseServiceAllocationController");
 
 const app = express();
 const port = process.env.PORT || 3000;
@@ -103,6 +133,26 @@ app.use("/acknowledgement", acknowledgementRoutes);
 app.use("/tat-delay", tatDelayRoutes);
 app.use("/external-login-credentials", externalLoginCredentials);
 app.use("/utils", utilsRoutes);
+
+app.use("/case-service-allocation", casevendoradmin);
+app.use("/case-service-allocation/vendor", casevendor);
+
+// Admin side
+// router.get("/case-service-allocation/list", csa.list);
+// router.post("/case-service-allocation/allocate", csa.allocate);
+// router.post("/case-service-allocation/allocate-bulk", csa.allocateBulk);
+// router.post("/case-service-allocation/case-access", csa.updateCaseAccess);
+// router.post("/case-service-allocation/attachment", upload.fields([{ name: "attachment" }]), csa.uploadAttachment);
+// router.post("/case-service-allocation/correction/review", csa.reviewCorrection);
+
+// Vendor side caseserviceallocation
+// router.get("/case-service-allocation/vendor/service-options", csa.vendorServiceOptions);
+// router.get("/case-service-allocation/vendor/cases", csa.vendorCaseList);
+// router.post("/case-service-allocation/vendor/accept", csa.vendorAcceptCase);
+// router.post("/case-service-allocation/vendor/upload-report", upload.fields([{ name: "image" }]), csa.vendorUploadReport);
+// router.post("/case-service-allocation/vendor/verified-date", csa.vendorUpdateVerifiedDate);
+// router.post("/case-service-allocation/vendor/complete", csa.vendorCompleteCase);
+// router.post("/case-service-allocation/vendor/request-correction", csa.vendorRequestCorrection);
 // Error handling middleware (optional)
 app.use((err, req, res, next) => {
   console.error(err.stack); // Log error stack for debugging
