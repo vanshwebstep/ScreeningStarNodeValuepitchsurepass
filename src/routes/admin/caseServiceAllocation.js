@@ -97,4 +97,7 @@ router.post("/allocate-bulk", csa.allocateBulk);
 router.post("/case-access", csa.updateCaseAccess);
 router.post("/attachment", upload.fields([{ name: "attachment" }]), csa.uploadAttachment);
 router.post("/correction/review", csa.reviewCorrection);
+router.post("/upload-access", csa.updateUploadAccess);
+router.post("/verification-status", csa.updateVerificationStatus);
+
 module.exports = router;

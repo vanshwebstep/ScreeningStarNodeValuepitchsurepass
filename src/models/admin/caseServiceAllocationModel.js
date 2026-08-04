@@ -17,7 +17,7 @@ const buildPublicFileUrl = (filePath, host) => {
   const baseHost = normalizeFileHost(host) || "http://localhost:5000";
   return `${baseHost}/${cleanPath}`;
 };
-
+const VERIFICATION_STATUS_VALUES = ["WIP", "INSUFF", "NOT DOABLE", "CANDIDATE DENIED", "STOPCHECK", "HOLD", "UNABLE TO VERIFY"];
 const getBackendFileHost = () =>
   new Promise((resolve) => {
     App.appInfo("backend", (err, appInfo) => {
@@ -90,106 +90,148 @@ const writeCandidateFieldValue = async (clientApplicationId, fieldKey, value) =>
 
 const CaseServiceAllocation = {
   // ── Admin: full service-wise listing ──────────────────────────────────────
-  listForAdmin: async (callback) => {
-    try {
-      const { sqlFragment } = await buildCandidateSelectFragment();
+listForAdmin: async (callback) => {
+  try {
+    const { sqlFragment } = await buildCandidateSelectFragment();
 
-      const sql = `
-  SELECT
-    csa.id AS allocation_id,
-    csa.client_application_id,
-    csa.service_id,
-    csa.service_title,
-    csa.vendor_id,
-    csa.vendor_name,
-    csa.vendor_code,
-    csa.vendor_case_status,
-    csa.vendor_case_enabled,
-    csa.vendor_allocated_at,
-    csa.vendor_accepted_at,
-    csa.vendor_report_path,
-    csa.vendor_report_uploaded_at,
-    csa.vendor_verified_date,
-    csa.attachment_path,
-    csa.attachment_uploaded_at,
-    ca.id AS main_id,
-    ca.application_id,
-    ca.employee_id,
-    ca.check_id,
-    ca.ticket_id,
-    ca.name AS applicant_name,
-    ca.gender,
-    ca.location,
-    ca.sub_client,
-    ca.client_spoc_name AS screeningstar_spoc,
-    c.name AS customer_name,
-    c.client_unique_id,
-    b.name AS branch_name,
-    cm.tat_days,
-    cm.client_spoc_name AS customer_spoc_name,
-    vm.vendor_spoc,
-    cmt.initiation_date,
-    cmt.deadline_date,
-    cmt.overall_status,
-    ${sqlFragment}
-  FROM case_service_allocations csa
-  INNER JOIN client_applications ca ON ca.id = csa.client_application_id
-  LEFT JOIN customers c ON c.id = ca.customer_id
-  LEFT JOIN branches b ON b.id = ca.branch_id
-  LEFT JOIN customer_metas cm ON cm.customer_id = ca.customer_id
-  LEFT JOIN vendor_managements vm ON vm.id = csa.vendor_id
-  LEFT JOIN cmt_applications cmt ON cmt.client_application_id = ca.id
-  WHERE ca.is_deleted != 1
-    AND ca.is_data_qc = 1
-    AND (c.is_deleted IS NULL OR c.is_deleted != 1)
-  ORDER BY ca.created_at DESC, csa.id ASC
-`;
+    console.log("========== SQL FRAGMENT ==========");
+    console.log(sqlFragment);
 
-      const rows = await sequelize.query(sql, { type: QueryTypes.SELECT });
+    const sql = `
+      SELECT
+        csa.id AS allocation_id,
+        csa.client_application_id,
+        csa.service_id,
+        csa.service_title,
+        csa.vendor_id,
+        csa.vendor_name,
+        csa.vendor_code,
+        csa.vendor_case_status,
+        csa.verification_status,
+        csa.vendor_case_enabled,
+        csa.vendor_upload_enabled,
+        csa.vendor_allocated_at,
+        csa.vendor_accepted_at,
+        csa.vendor_report_path,
+        csa.vendor_report_uploaded_at,
+        csa.vendor_verified_date,
+        csa.attachment_path,
+        csa.attachment_uploaded_at,
+        ca.id AS main_id,
+        ca.application_id,
+        ca.employee_id,
+        ca.check_id,
+        ca.ticket_id,
+        ca.name AS applicant_name,
+        ca.gender,
+        ca.location,
+        ca.sub_client,
+        ca.client_spoc_name AS screeningstar_spoc,
+        c.name AS customer_name,
+        c.client_unique_id,
+        b.name AS branch_name,
+        cm.tat_days,
+        cm.client_spoc_name AS customer_spoc_name,
+        vm.vendor_spoc,
+        cmt.initiation_date,
+        cmt.deadline_date,
+        cmt.overall_status,
+        ${sqlFragment}
+      FROM case_service_allocations csa
+      INNER JOIN client_applications ca ON ca.id = csa.client_application_id
+      LEFT JOIN customers c ON c.id = ca.customer_id
+      LEFT JOIN branches b ON b.id = ca.branch_id
+      LEFT JOIN customer_metas cm ON cm.customer_id = ca.customer_id
+      LEFT JOIN vendor_managements vm ON vm.id = csa.vendor_id
+      LEFT JOIN cmt_applications cmt ON cmt.client_application_id = ca.id
+      WHERE ca.is_deleted != 1
+        AND ca.is_data_qc = 1
+        AND (c.is_deleted IS NULL OR c.is_deleted != 1)
+      ORDER BY ca.created_at DESC, csa.id ASC
+    `;
 
-      // attach pending correction requests per allocation
-      const pendingRows = await sequelize.query(
-        `SELECT * FROM vendor_correction_requests WHERE status = 'pending'`,
-        { type: QueryTypes.SELECT }
+    console.log("========== FULL SQL ==========");
+    console.log(sql);
+
+    const rows = await sequelize.query(sql, {
+      type: QueryTypes.SELECT
+    });
+
+    console.log("========== MAIN QUERY RESULT ==========");
+    console.log("Rows count:", rows.length);
+    console.log("Rows:", rows);
+
+    const pendingRows = await sequelize.query(
+      `SELECT * FROM vendor_correction_requests WHERE status = 'pending'`,
+      { type: QueryTypes.SELECT }
+    );
+
+    console.log("========== PENDING REQUESTS ==========");
+    console.log("Pending rows:", pendingRows.length);
+    console.log(pendingRows);
+
+    const pendingByAllocation = new Map();
+
+    pendingRows.forEach((request) => {
+      const list =
+        pendingByAllocation.get(request.case_service_allocation_id) || [];
+
+      list.push(request);
+      pendingByAllocation.set(
+        request.case_service_allocation_id,
+        list
       );
-      const pendingByAllocation = new Map();
-      pendingRows.forEach((request) => {
-        const list = pendingByAllocation.get(request.case_service_allocation_id) || [];
-        list.push(request);
-        pendingByAllocation.set(request.case_service_allocation_id, list);
-      });
+    });
 
-      const fileHost = await getBackendFileHost();
-      const applications = rows.map((row) => ({
-        ...row,
-        vendor_report_url: buildPublicFileUrl(row.vendor_report_path, fileHost),
-        attachment_url: buildPublicFileUrl(row.attachment_path, fileHost),
-        pending_correction_requests: pendingByAllocation.get(row.allocation_id) || [],
-      }));
+    const fileHost = await getBackendFileHost();
 
-      callback(null, applications);
-    } catch (error) {
-      callback(error, null);
-    }
-  },
+    console.log("========== FILE HOST ==========");
+    console.log(fileHost);
+
+    const applications = rows.map((row) => ({
+      ...row,
+      vendor_report_url: buildPublicFileUrl(
+        row.vendor_report_path,
+        fileHost
+      ),
+      attachment_url: buildPublicFileUrl(
+        row.attachment_path,
+        fileHost
+      ),
+      pending_correction_requests:
+        pendingByAllocation.get(row.allocation_id) || [],
+    }));
+
+    console.log("========== FINAL APPLICATIONS ==========");
+    console.log("Applications count:", applications.length);
+    console.log(applications);
+
+    callback(null, applications);
+
+  } catch (error) {
+
+    console.log("========== LIST FOR ADMIN ERROR ==========");
+    console.error(error);
+    console.error("Error message:", error.message);
+    console.error("Error stack:", error.stack);
+
+    callback(error, null);
+  }
+},
 
   allocate: async (allocationId, vendor, adminId, callback) => {
     try {
       const result = await sequelize.query(
         `UPDATE case_service_allocations
-         SET vendor_id = ?, vendor_name = ?, vendor_code = ?,
-             vendor_allocated_at = NOW(), vendor_allocated_by = ?,
-             vendor_case_status = 'assigned', vendor_case_enabled = 1
-         WHERE id = ?`,
-        {
-          replacements: [vendor.id, vendor.name_of_organization, vendor.vendor_code || null, adminId, allocationId],
-          type: QueryTypes.UPDATE,
-        }
+       SET vendor_id = ?, vendor_name = ?, vendor_code = ?,
+           vendor_allocated_at = NOW(), vendor_allocated_by = ?,
+           vendor_case_status = 'assigned', vendor_case_enabled = 1,
+           vendor_upload_enabled = 1
+       WHERE id = ?`,
+        { replacements: [vendor.id, vendor.name_of_organization, vendor.vendor_code || null, adminId, allocationId], type: QueryTypes.UPDATE }
       );
       callback(null, result);
-    } catch (error) {
-      callback(error, null);
-    }
+    } catch (error) { callback(error, null); }
   },
 
   allocateBulk: async (allocationIds, vendor, adminId, callback) => {
@@ -225,6 +267,26 @@ const CaseServiceAllocation = {
       callback(error, null);
     }
   },
+    updateVerificationStatus: async (allocationId, status, vendorId, callback) => {
+    try {
+      if (!VERIFICATION_STATUS_VALUES.includes(status)) {
+        return callback(new Error("Invalid verification status."), null);
+      }
+      const replacements = [status, allocationId];
+      let ownerClause = "";
+      if (vendorId) {
+        ownerClause = "AND vendor_id = ?";
+        replacements.push(vendorId);
+      }
+      const result = await sequelize.query(
+        `UPDATE case_service_allocations SET verification_status = ? WHERE id = ? ${ownerClause} AND vendor_case_enabled = 1`,
+        { replacements, type: QueryTypes.UPDATE }
+      );
+      callback(null, result);
+    } catch (error) {
+      callback(error, null);
+    }
+  },
 
   saveAttachment: async (allocationId, attachmentPath, adminId, callback) => {
     try {
@@ -252,8 +314,9 @@ const CaseServiceAllocation = {
     }
   },
 
-  findForMail: async (allocationId, vendorId, callback) => {
+findForMail: async (allocationId, vendorId, callback) => {
     try {
+      const { sqlFragment } = await buildCandidateSelectFragment();
       const replacements = [allocationId];
       let vendorFilter = "";
       if (vendorId) {
@@ -261,17 +324,25 @@ const CaseServiceAllocation = {
         replacements.push(vendorId);
       }
       const rows = await sequelize.query(
-        `SELECT csa.*, ca.application_id, ca.name AS applicant_name,
-                c.name AS customer_name, admins.email AS allocated_admin_email
+        `SELECT csa.*, ca.application_id, ca.name AS applicant_name, ca.gender,
+                c.name AS customer_name, b.name AS branch_name,
+                admins.email AS allocated_admin_email,
+                cmt.initiation_date, cmt.deadline_date,
+                ${sqlFragment}
          FROM case_service_allocations csa
          INNER JOIN client_applications ca ON ca.id = csa.client_application_id
          LEFT JOIN customers c ON c.id = ca.customer_id
+         LEFT JOIN branches b ON b.id = ca.branch_id
          LEFT JOIN admins ON admins.id = csa.vendor_allocated_by
+         LEFT JOIN cmt_applications cmt ON cmt.client_application_id = ca.id
          WHERE csa.id = ? ${vendorFilter}
          LIMIT 1`,
         { replacements, type: QueryTypes.SELECT }
       );
-      callback(null, rows[0] || null);
+      const row = rows[0] || null;
+      if (!row) return callback(null, null);
+      const fileHost = await getBackendFileHost();
+      callback(null, { ...row, attachment_url: buildPublicFileUrl(row.attachment_path, fileHost) });
     } catch (error) {
       callback(error, null);
     }
@@ -300,7 +371,9 @@ const CaseServiceAllocation = {
           csa.service_id,
           csa.service_title,
           csa.vendor_case_status,
+          csa.verification_status,
           csa.vendor_case_enabled,
+          csa.vendor_upload_enabled,
           csa.vendor_report_path,
           csa.vendor_report_uploaded_at,
           csa.vendor_verified_date,
@@ -319,6 +392,7 @@ const CaseServiceAllocation = {
         LEFT JOIN cmt_applications cmt ON cmt.client_application_id = ca.id
         WHERE csa.vendor_id = ?
           AND ca.is_deleted != 1
+           AND ca.is_data_qc = 1
           ${statusClause}
           ${serviceClause}
         ORDER BY COALESCE(cmt.initiation_date, ca.created_at) DESC, csa.id DESC
@@ -383,14 +457,22 @@ const CaseServiceAllocation = {
     try {
       const result = await sequelize.query(
         `UPDATE case_service_allocations
-         SET vendor_report_path = ?, vendor_report_uploaded_at = NOW()
-         WHERE id = ? AND vendor_id = ? AND vendor_case_enabled = 1`,
+       SET vendor_report_path = ?, vendor_report_uploaded_at = NOW(),
+           vendor_upload_enabled = 0
+       WHERE id = ? AND vendor_id = ? AND vendor_case_enabled = 1 AND vendor_upload_enabled = 1`,
         { replacements: [reportPath, allocationId, vendorId], type: QueryTypes.UPDATE }
       );
+      callback(null, result); // result[1] === 0 means blocked (already uploaded/disabled)
+    } catch (error) { callback(error, null); }
+  },
+  updateUploadAccess: async (allocationId, enabled, callback) => {
+    try {
+      const result = await sequelize.query(
+        `UPDATE case_service_allocations SET vendor_upload_enabled = ? WHERE id = ?`,
+        { replacements: [enabled ? 1 : 0, allocationId], type: QueryTypes.UPDATE }
+      );
       callback(null, result);
-    } catch (error) {
-      callback(error, null);
-    }
+    } catch (error) { callback(error, null); }
   },
 
   updateVerifiedDate: async (vendorId, allocationId, verifiedDate, callback) => {
@@ -407,11 +489,11 @@ const CaseServiceAllocation = {
     }
   },
 
-  completeCase: async (vendorId, allocationId, callback) => {
+completeCase: async (vendorId, allocationId, callback) => {
     try {
       const result = await sequelize.query(
         `UPDATE case_service_allocations
-         SET vendor_case_status = 'completed'
+         SET vendor_case_status = 'completed', verification_status = 'COMPLETED'
          WHERE id = ? AND vendor_id = ? AND vendor_case_enabled = 1
            AND vendor_report_path IS NOT NULL AND TRIM(vendor_report_path) != ''
            AND vendor_verified_date IS NOT NULL`,
@@ -424,4 +506,4 @@ const CaseServiceAllocation = {
   },
 };
 
-module.exports = { CaseServiceAllocation, writeCandidateFieldValue, resolveCandidateColumn, getCmtColumns };
+module.exports = { CaseServiceAllocation, writeCandidateFieldValue, resolveCandidateColumn, getCmtColumns, VERIFICATION_STATUS_VALUES };

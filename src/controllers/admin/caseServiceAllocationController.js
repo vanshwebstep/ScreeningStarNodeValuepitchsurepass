@@ -1,9 +1,12 @@
-const { CaseServiceAllocation, writeCandidateFieldValue } = require("../../models/admin/caseServiceAllocationModel");
+const { CaseServiceAllocation, writeCandidateFieldValue, VERIFICATION_STATUS_VALUES } = require("../../models/admin/caseServiceAllocationModel");
 const VendorCorrection = require("../../models/admin/vendorCorrectionModel");
 const AdminCommon = require("../../models/admin/commonModel");
 const Vendor = require("../../models/admin/vendorModel");
 const { saveImage } = require("../../utils/cloudImageSave");
 const { getClientIpAddress } = require("../../utils/ipAddress");
+const { sendVendorAssignedMail, sendVendorBulkAssignedMail, sendVendorAttachmentMail } = require("../../mailer/admin/vendor-management/welcomeMail");
+
+const vendorLoginUrl = (email) => `https://dev-screeningstar.netlify.app/vendor-login?email=${encodeURIComponent(email)}`;
 
 const authorizeAdmin = (admin_id, _token, res, next) => {
   AdminCommon.isAdminAuthorizedForAction(admin_id, "admin_manager", (auth) => {
@@ -43,12 +46,25 @@ exports.allocate = (req, res) => {
 
       CaseServiceAllocation.allocate(allocation_id, vendor, admin_id, (err) => {
         if (err) return res.status(500).json({ status: false, message: err.message, token: newToken });
+
+        CaseServiceAllocation.findForMail(allocation_id, vendor.id, (mailErr, caseInfo) => {
+          if (mailErr) {
+            console.error("Vendor assignment mail case lookup failed:", mailErr.message);
+          } else {
+            sendVendorAssignedMail({
+              vendorName: vendor.name_of_organization,
+              email: vendor.email_id,
+              caseInfo: caseInfo || { application_id: allocation_id },
+              loginUrl: vendorLoginUrl(vendor.email_id),
+            }).catch((mailSendErr) => console.error("Vendor assignment mail failed:", mailSendErr.message));
+          }
+        });
+
         res.json({ status: true, message: "Vendor allocated to service successfully.", token: newToken });
       });
     });
   });
 };
-
 // ── Admin: bulk allocate ──────────────────────────────────────────────────────
 exports.allocateBulk = (req, res) => {
   const { allocation_ids, vendor_id, admin_id, _token } = req.body;
@@ -66,6 +82,18 @@ exports.allocateBulk = (req, res) => {
         if (err) return res.status(500).json({ status: false, message: err.message, token: newToken });
         const affected = Array.isArray(result) ? Number(result[1] || 0) : 0;
         if (!affected) return res.status(400).json({ status: false, message: "No selected services were allocated.", token: newToken });
+
+        Promise.all(ids.map((id) => new Promise((resolve) => {
+          CaseServiceAllocation.findForMail(id, vendor.id, (mailErr, caseInfo) => {
+            resolve(mailErr ? { application_id: id } : (caseInfo || { application_id: id }));
+          });
+        }))).then((cases) => sendVendorBulkAssignedMail({
+          vendorName: vendor.name_of_organization,
+          email: vendor.email_id,
+          cases,
+          loginUrl: vendorLoginUrl(vendor.email_id),
+        })).catch((mailErr) => console.error("Bulk vendor assignment mail failed:", mailErr.message));
+
         res.json({ status: true, message: `${affected} service(s) allocated successfully.`, token: newToken });
       });
     });
@@ -82,6 +110,23 @@ exports.updateCaseAccess = (req, res) => {
     CaseServiceAllocation.updateCaseAccess(allocation_id, Number(enabled) === 1, (err) => {
       if (err) return res.status(500).json({ status: false, message: err.message, token: newToken });
       res.json({ status: true, message: "Access updated.", token: newToken });
+    });
+  });
+};
+exports.updateVerificationStatus = (req, res) => {
+  const { allocation_id, verification_status, admin_id, _token } = req.body;
+  if (!allocation_id || !verification_status || !admin_id || !_token) {
+    return res.status(400).json({ status: false, message: "Missing required fields: Allocation ID, Verification Status, Admin ID, Token" });
+  }
+  if (!VERIFICATION_STATUS_VALUES.includes(verification_status)) {
+    return res.status(400).json({ status: false, message: "Invalid verification status." });
+  }
+  authorizeAdmin(admin_id, _token, res, (newToken) => {
+    CaseServiceAllocation.updateVerificationStatus(allocation_id, verification_status, null, (err, result) => {
+      if (err) return res.status(500).json({ status: false, message: err.message, token: newToken });
+      const affected = Array.isArray(result) ? Number(result[1] || 0) : 0;
+      if (!affected) return res.status(400).json({ status: false, message: "Unable to update — case is disabled or not found.", token: newToken });
+      res.json({ status: true, message: "Verification status updated.", token: newToken });
     });
   });
 };
@@ -103,6 +148,24 @@ exports.uploadAttachment = async (req, res) => {
 
       CaseServiceAllocation.saveAttachment(allocation_id, attachmentPath, admin_id, (err) => {
         if (err) return res.status(500).json({ status: false, message: err.message, token: newToken });
+
+        CaseServiceAllocation.findById(allocation_id, (findErr, allocation) => {
+          if (!findErr && allocation && allocation.vendor_id) {
+            Vendor.findById(allocation.vendor_id, (vendorErr, vendor) => {
+              if (vendorErr || !vendor) return;
+              CaseServiceAllocation.findForMail(allocation_id, vendor.id, (mailErr, caseInfo) => {
+                if (mailErr || !caseInfo || !caseInfo.attachment_url) return;
+                sendVendorAttachmentMail({
+                  vendorName: vendor.name_of_organization,
+                  email: vendor.email_id,
+                  caseInfo,
+                  loginUrl: vendorLoginUrl(vendor.email_id),
+                }).catch((mailSendErr) => console.error("Vendor attachment mail failed:", mailSendErr.message));
+              });
+            });
+          }
+        });
+
         res.json({ status: true, message: "Attachment uploaded successfully.", attachment_path: attachmentPath, token: newToken });
       });
     } catch (error) {
@@ -212,8 +275,12 @@ exports.vendorUploadReport = (req, res) => {
       const safeVendorCode = String(vendor.vendor_code || vendor.id).replace(/[^a-zA-Z0-9_-]/g, "-");
       const targetDir = `uploads/vendors/${safeVendorCode}/service-allocations/${allocation_id}/reports`;
       const reportPath = await saveImage(file, targetDir, "vendor-report");
-      CaseServiceAllocation.saveReport(vendor_id, allocation_id, reportPath, (err2) => {
+      CaseServiceAllocation.saveReport(vendor_id, allocation_id, reportPath, (err2, result) => {
         if (err2) return res.status(500).json({ status: false, message: err2.message });
+        const affected = Array.isArray(result) ? Number(result[1] || 0) : 0;
+        if (!affected) {
+          return res.status(403).json({ status: false, message: "Upload access disabled. Contact admin to re-enable." });
+        }
         res.json({ status: true, message: "Report uploaded successfully.", report_path: reportPath, token: _token });
       });
     } catch (error) {
@@ -230,6 +297,25 @@ exports.vendorUpdateVerifiedDate = (req, res) => {
     CaseServiceAllocation.updateVerifiedDate(vendor_id, allocation_id, verified_date, (err2) => {
       if (err2) return res.status(500).json({ status: false, message: err2.message });
       res.json({ status: true, message: "Verified date updated.", token: _token });
+    });
+  });
+};
+exports.vendorUpdateVerificationStatus = (req, res) => {
+  const { vendor_id, _token, allocation_id, verification_status } = req.body;
+  if (!allocation_id || !verification_status) {
+    return res.status(400).json({ status: false, message: "Missing required fields: Allocation ID, Verification Status." });
+  }
+  if (!VERIFICATION_STATUS_VALUES.includes(verification_status)) {
+    return res.status(400).json({ status: false, message: "Invalid verification status. Use the Complete action to mark a case as completed." });
+  }
+  Vendor.findById(vendor_id, (err, vendor) => {
+    if (err) return res.status(500).json({ status: false, message: err.message });
+    if (!vendor || vendor.login_token !== _token) return res.status(401).json({ status: false, message: "Invalid or expired token." });
+    CaseServiceAllocation.updateVerificationStatus(allocation_id, verification_status, vendor_id, (err2, result) => {
+      if (err2) return res.status(500).json({ status: false, message: err2.message });
+      const affected = Array.isArray(result) ? Number(result[1] || 0) : 0;
+      if (!affected) return res.status(400).json({ status: false, message: "Unable to update — case is disabled or not yours." });
+      res.json({ status: true, message: "Verification status updated.", token: _token });
     });
   });
 };
@@ -281,6 +367,19 @@ exports.vendorRequestCorrection = (req, res) => {
           res.json({ status: true, message: "Correction request submitted. Admin will review it.", token: _token });
         }
       );
+    });
+  });
+};
+
+exports.updateUploadAccess = (req, res) => {
+  const { allocation_id, enabled, admin_id, _token } = req.body;
+  if (!allocation_id || enabled === undefined || !admin_id || !_token) {
+    return res.status(400).json({ status: false, message: "Missing required fields: Allocation ID, Enabled, Admin ID, Token" });
+  }
+  authorizeAdmin(admin_id, _token, res, (newToken) => {
+    CaseServiceAllocation.updateUploadAccess(allocation_id, Number(enabled) === 1, (err) => {
+      if (err) return res.status(500).json({ status: false, message: err.message, token: newToken });
+      res.json({ status: true, message: "Upload access updated.", token: newToken });
     });
   });
 };

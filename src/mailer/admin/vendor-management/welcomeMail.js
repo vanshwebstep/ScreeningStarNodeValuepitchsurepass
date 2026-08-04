@@ -1,7 +1,19 @@
 const nodemailer = require("nodemailer");
 const { sequelize } = require("../../../config/db");
 const { QueryTypes } = require("sequelize");
+const path = require("path");
 
+const getAttachmentFilename = (url, applicationId) => {
+  const fallback = `attachment-${applicationId || "case"}`;
+  if (!url) return fallback;
+  try {
+    const cleanUrl = url.split("?")[0].split("#")[0]; // query/hash strip
+    const ext = path.extname(cleanUrl);
+    return ext ? `${fallback}${ext}` : fallback;
+  } catch {
+    return fallback;
+  }
+};
 const getSmtp = async (mailModule, action) => {
   if (mailModule && action) {
     const moduleRows = await sequelize.query(
@@ -58,10 +70,10 @@ const sendVendorWelcomeMail = async ({ vendorName, email, password, loginUrl }) 
 const sendVendorResetPasswordMail = async ({ vendorName, email, resetLink }) => {
   const smtp = await getSmtp("branch auth", "forget-password");
   if (!smtp) throw new Error("SMTP credentials not found");
-console.log("SMTP credentials:", smtp);
-console.log("SMTP vendorName:", vendorName);
-console.log("SMTP email:", email);
-console.log("SMTP resetLink:", resetLink);
+  console.log("SMTP credentials:", smtp);
+  console.log("SMTP vendorName:", vendorName);
+  console.log("SMTP email:", email);
+  console.log("SMTP resetLink:", resetLink);
 
   const transporter = nodemailer.createTransport({
     host: smtp.host,
@@ -85,7 +97,7 @@ console.log("SMTP resetLink:", resetLink);
       <p>Regards,<br/>ScreeningStar Team</p>
     </div>
   `;
-console.log("SMTP transporter:", transporter);
+  console.log("SMTP transporter:", transporter);
   return transporter.sendMail({
     from: `"${smtp.title}" <${smtp.username}>`,
     to: `"${vendorName || "Vendor"}" <${email}>`,
@@ -147,26 +159,34 @@ const sendVendorAssignedMail = async ({ vendorName, email, caseInfo = {}, loginU
       <p>A new application has been assigned to you on ScreeningStar Vendor Portal.</p>
       <table cellpadding="8" cellspacing="0" style="border-collapse: collapse; margin: 16px 0;">
         ${detailRows([
-          ["Reference ID", caseInfo.application_id],
-          ["Applicant Name", caseInfo.name],
-          ["Client Name", caseInfo.customer_name],
-          ["Branch", caseInfo.branch_name],
-          ["Services", caseInfo.service_names],
-          ["Initiation Date", formatDate(caseInfo.initiation_date || caseInfo.created_at)],
-          ["Deadline Date", formatDate(caseInfo.deadline_date)],
-          ["Login URL", loginUrl ? `<a href="${loginUrl}">${loginUrl}</a>` : "NIL"],
-        ])}
+    ["Reference ID", caseInfo.application_id],
+    ["Service", caseInfo.service_title],
+    ["Applicant Name", caseInfo.applicant_name || caseInfo.name],
+    ["Father Name", caseInfo.father_name],
+    ["Gender", caseInfo.gender],
+    ["DOB", formatDate(caseInfo.dob)],
+    ["Client Name", caseInfo.customer_name],
+    ["Branch", caseInfo.branch_name],
+    ["Initiation Date", formatDate(caseInfo.initiation_date || caseInfo.created_at)],
+    ["Deadline Date", formatDate(caseInfo.deadline_date)],
+    ["Login URL", loginUrl ? `<a href="${loginUrl}">${loginUrl}</a>` : "NIL"],
+  ])}
       </table>
+      ${caseInfo.attachment_url ? `<p>A reference document is attached to this email.</p>` : ""}
       <p>Please login to your vendor dashboard and proceed with the assigned case.</p>
       <p>Regards,<br/>ScreeningStar Team</p>
     </div>
   `;
 
+  const attachments = caseInfo.attachment_url
+    ? [{ filename: getAttachmentFilename(caseInfo.attachment_url, caseInfo.application_id), path: caseInfo.attachment_url }]
+    : [];
   return transporter.sendMail({
     from: `"${smtp.title || "ScreeningStar"}" <${smtp.username}>`,
     to: `"${vendorName || "Vendor"}" <${email}>`,
     subject: `ScreeningStar Case Assigned - ${display(caseInfo.application_id)}`,
     html,
+    attachments,
   });
 };
 
@@ -174,10 +194,13 @@ const caseRows = (cases = []) => cases.map((caseInfo, index) => `
   <tr>
     <td style="border:1px solid #ddd;">${index + 1}</td>
     <td style="border:1px solid #ddd;">${display(caseInfo.application_id)}</td>
-    <td style="border:1px solid #ddd;">${display(caseInfo.name)}</td>
+    <td style="border:1px solid #ddd;">${display(caseInfo.applicant_name || caseInfo.name)}</td>
+    <td style="border:1px solid #ddd;">${display(caseInfo.father_name)}</td>
+    <td style="border:1px solid #ddd;">${display(caseInfo.gender)}</td>
+    <td style="border:1px solid #ddd;">${formatDate(caseInfo.dob)}</td>
     <td style="border:1px solid #ddd;">${display(caseInfo.customer_name)}</td>
     <td style="border:1px solid #ddd;">${display(caseInfo.branch_name)}</td>
-    <td style="border:1px solid #ddd;">${display(caseInfo.service_names)}</td>
+    <td style="border:1px solid #ddd;">${display(caseInfo.service_title || caseInfo.service_names)}</td>
     <td style="border:1px solid #ddd;">${formatDate(caseInfo.initiation_date || caseInfo.created_at)}</td>
     <td style="border:1px solid #ddd;">${formatDate(caseInfo.deadline_date)}</td>
   </tr>
@@ -208,9 +231,12 @@ const sendVendorBulkAssignedMail = async ({ vendorName, email, cases = [], login
             <th style="border:1px solid #ddd; text-align:left;">Sno.</th>
             <th style="border:1px solid #ddd; text-align:left;">Reference ID</th>
             <th style="border:1px solid #ddd; text-align:left;">Applicant Name</th>
+            <th style="border:1px solid #ddd; text-align:left;">Father Name</th>
+            <th style="border:1px solid #ddd; text-align:left;">Gender</th>
+            <th style="border:1px solid #ddd; text-align:left;">DOB</th>
             <th style="border:1px solid #ddd; text-align:left;">Client Name</th>
             <th style="border:1px solid #ddd; text-align:left;">Branch</th>
-            <th style="border:1px solid #ddd; text-align:left;">Services</th>
+            <th style="border:1px solid #ddd; text-align:left;">Service</th>
             <th style="border:1px solid #ddd; text-align:left;">Initiation Date</th>
             <th style="border:1px solid #ddd; text-align:left;">Deadline Date</th>
           </tr>
@@ -223,13 +249,21 @@ const sendVendorBulkAssignedMail = async ({ vendorName, email, cases = [], login
     </div>
   `;
 
+  const attachments = cases
+    .filter((caseInfo) => caseInfo.attachment_url)
+    .map((caseInfo) => ({
+      filename: getAttachmentFilename(caseInfo.attachment_url, caseInfo.application_id),
+      path: caseInfo.attachment_url,
+    }));
   return transporter.sendMail({
     from: `"${smtp.title || "ScreeningStar"}" <${smtp.username}>`,
     to: `"${vendorName || "Vendor"}" <${email}>`,
     subject: `ScreeningStar Cases Assigned - ${cases.length} Cases`,
     html,
+    attachments,
   });
 };
+
 const sendVendorAcceptedMail = async ({ vendorName, caseInfo = {}, recipients = [] }) => {
   const smtp = await getSmtp();
   if (!smtp) throw new Error("SMTP credentials not found");
@@ -259,17 +293,17 @@ const sendVendorAcceptedMail = async ({ vendorName, caseInfo = {}, recipients = 
       <p>${vendorName || "Vendor"} has accepted the assigned application on ScreeningStar Vendor Portal.</p>
       <table cellpadding="8" cellspacing="0" style="border-collapse: collapse; margin: 16px 0;">
         ${detailRows([
-          ["Vendor", vendorName],
-          ["Vendor Code", caseInfo.vendor_code],
-          ["Reference ID", caseInfo.application_id],
-          ["Applicant Name", caseInfo.name],
-          ["Client Name", caseInfo.customer_name],
-          ["Branch", caseInfo.branch_name],
-          ["Services", caseInfo.service_names],
-          ["Accepted Date", formatDate(caseInfo.vendor_accepted_at || new Date())],
-          ["Initiation Date", formatDate(caseInfo.initiation_date || caseInfo.created_at)],
-          ["Deadline Date", formatDate(caseInfo.deadline_date)],
-        ])}
+    ["Vendor", vendorName],
+    ["Vendor Code", caseInfo.vendor_code],
+    ["Reference ID", caseInfo.application_id],
+    ["Applicant Name", caseInfo.name],
+    ["Client Name", caseInfo.customer_name],
+    ["Branch", caseInfo.branch_name],
+    ["Services", caseInfo.service_names],
+    ["Accepted Date", formatDate(caseInfo.vendor_accepted_at || new Date())],
+    ["Initiation Date", formatDate(caseInfo.initiation_date || caseInfo.created_at)],
+    ["Deadline Date", formatDate(caseInfo.deadline_date)],
+  ])}
       </table>
       <p>Regards,<br/>ScreeningStar Team</p>
     </div>
@@ -310,17 +344,17 @@ const sendVendorCompletedMail = async ({ vendorName, caseInfo = {}, recipients =
       <p>${vendorName || "Vendor"} has completed the assigned application on ScreeningStar Vendor Portal.</p>
       <table cellpadding="8" cellspacing="0" style="border-collapse: collapse; margin: 16px 0;">
         ${detailRows([
-          ["Vendor", vendorName],
-          ["Vendor Code", caseInfo.vendor_code],
-          ["Reference ID", caseInfo.application_id],
-          ["Applicant Name", caseInfo.name],
-          ["Client Name", caseInfo.customer_name],
-          ["Branch", caseInfo.branch_name],
-          ["Services", caseInfo.service_names],
-          ["Accepted Date", formatDate(caseInfo.vendor_accepted_at)],
-          ["Verified Date", formatDate(caseInfo.vendor_verified_date)],
-          ["Report Uploaded At", formatDate(caseInfo.vendor_report_uploaded_at)],
-        ])}
+    ["Vendor", vendorName],
+    ["Vendor Code", caseInfo.vendor_code],
+    ["Reference ID", caseInfo.application_id],
+    ["Applicant Name", caseInfo.name],
+    ["Client Name", caseInfo.customer_name],
+    ["Branch", caseInfo.branch_name],
+    ["Services", caseInfo.service_names],
+    ["Accepted Date", formatDate(caseInfo.vendor_accepted_at)],
+    ["Verified Date", formatDate(caseInfo.vendor_verified_date)],
+    ["Report Uploaded At", formatDate(caseInfo.vendor_report_uploaded_at)],
+  ])}
       </table>
       <p>Please review the uploaded vendor report in admin panel.</p>
       <p>Regards,<br/>ScreeningStar Team</p>
@@ -334,5 +368,52 @@ const sendVendorCompletedMail = async ({ vendorName, caseInfo = {}, recipients =
     html,
   });
 };
+const sendVendorAttachmentMail = async ({ vendorName, email, caseInfo = {}, loginUrl }) => {
+  const smtp = await getSmtp();
+  if (!smtp) throw new Error("SMTP credentials not found");
+  if (!caseInfo.attachment_url) throw new Error("No attachment to send.");
 
-module.exports = { sendVendorWelcomeMail, sendVendorResetPasswordMail, sendVendorAssignedMail, sendVendorBulkAssignedMail, sendVendorAcceptedMail, sendVendorCompletedMail };
+  const transporter = nodemailer.createTransport({
+    host: smtp.host,
+    port: Number(smtp.port),
+    secure: smtp.secure === true || smtp.secure === 1 || smtp.secure === "1" || smtp.secure === "true",
+    auth: {
+      user: smtp.username,
+      pass: smtp.password,
+    },
+  });
+
+  const html = `
+    <div style="font-family: Arial, sans-serif; color: #222; line-height: 1.5;">
+      <h2 style="color:#073d88; margin-bottom: 10px;">Document Added to Your Assigned Case</h2>
+      <p>Hello ${vendorName || "Vendor"},</p>
+      <p>A new document has been attached to a case already assigned to you on ScreeningStar Vendor Portal.</p>
+      <table cellpadding="8" cellspacing="0" style="border-collapse: collapse; margin: 16px 0;">
+        ${detailRows([
+    ["Reference ID", caseInfo.application_id],
+    ["Service", caseInfo.service_title],
+    ["Applicant Name", caseInfo.applicant_name || caseInfo.name],
+    ["Father Name", caseInfo.father_name],
+    ["Gender", caseInfo.gender],
+    ["DOB", formatDate(caseInfo.dob)],
+  ])}
+      </table>
+      <p>The document is attached to this email. You can also view it from your vendor dashboard.</p>
+      ${loginUrl ? `<p><a href="${loginUrl}">${loginUrl}</a></p>` : ""}
+      <p>Regards,<br/>ScreeningStar Team</p>
+    </div>
+  `;
+
+  return transporter.sendMail({
+    from: `"${smtp.title || "ScreeningStar"}" <${smtp.username}>`,
+    to: `"${vendorName || "Vendor"}" <${email}>`,
+    subject: `ScreeningStar Document Added - ${display(caseInfo.application_id)}`,
+    html,
+    attachments: [{
+      filename: getAttachmentFilename(caseInfo.attachment_url, caseInfo.application_id),
+      path: caseInfo.attachment_url,
+    }],
+  });
+};
+
+module.exports = { sendVendorWelcomeMail, sendVendorResetPasswordMail, sendVendorAssignedMail, sendVendorBulkAssignedMail, sendVendorAcceptedMail, sendVendorCompletedMail, sendVendorAttachmentMail };

@@ -98,6 +98,7 @@ router.get("/cases", csa.vendorCaseList);
 router.post("/accept", csa.vendorAcceptCase);
 router.post("/upload-report", upload.fields([{ name: "image" }]), csa.vendorUploadReport);
 router.post("/verified-date", csa.vendorUpdateVerifiedDate);
+router.post("/verification-status", csa.vendorUpdateVerificationStatus);
 router.post("/complete", csa.vendorCompleteCase);
 router.post("/request-correction", csa.vendorRequestCorrection);
 module.exports = router;
