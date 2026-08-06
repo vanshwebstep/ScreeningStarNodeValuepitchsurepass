@@ -383,3 +383,21 @@ exports.updateUploadAccess = (req, res) => {
     });
   });
 };
+
+// ── Vendor: save remarks — gated by the SAME upload-access toggle admin controls ──
+exports.vendorSaveRemarks = (req, res) => {
+  const { vendor_id, _token, allocation_id, remarks } = req.body;
+  if (!allocation_id || remarks === undefined) {
+    return res.status(400).json({ status: false, message: "Missing required fields: Allocation ID, Remarks." });
+  }
+  Vendor.findById(vendor_id, (err, vendor) => {
+    if (err) return res.status(500).json({ status: false, message: err.message });
+    if (!vendor || vendor.login_token !== _token) return res.status(401).json({ status: false, message: "Invalid or expired token." });
+    CaseServiceAllocation.saveVendorRemarks(vendor_id, allocation_id, remarks, (err2, result) => {
+      if (err2) return res.status(500).json({ status: false, message: err2.message });
+      const affected = Array.isArray(result) ? Number(result[1] || 0) : 0;
+      if (!affected) return res.status(403).json({ status: false, message: "Remarks access disabled. Contact admin to enable upload access." });
+      res.json({ status: true, message: "Remarks saved successfully.", token: _token });
+    });
+  });
+};

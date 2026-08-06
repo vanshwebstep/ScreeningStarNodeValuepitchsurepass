@@ -25,57 +25,55 @@ App.appInfo("backend", (err, appInfo) => {
   cloudImageFTPUser = appInfo.cloud_ftp_user;
   cloudImageFTPPassword = appInfo.cloud_ftp_password;
   cloudImageFTPSecure = appInfo.cloud_ftp_secure;
-  // Check if any FTP details are missing and handle the error
   if (!cloudImageFTPHost || !cloudImageFTPUser || !cloudImageFTPPassword) {
     console.error("FTP configuration missing required details.");
     return;
   }
-  // Set cloudImageFTPSecure based on its value (0 = false, anything else = true)
   cloudImageFTPSecure = cloudImageFTPSecure === 0 ? false : true;
 });
 
 // Set up multer storage
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
-    const dir = "uploads"; // Original upload directory
+    const dir = "uploads";
     if (!fs.existsSync(dir)) {
-      fs.mkdirSync(dir, { recursive: true }); // Create directory if it doesn't exist
+      fs.mkdirSync(dir, { recursive: true });
     }
     cb(null, dir);
   },
   filename: (req, file, cb) => {
     const timestamp = Date.now();
-    const randomNumber = Math.floor(Math.random() * 10000); // Random number
-    const extension = path.extname(file.originalname); // Get the file extension
-    const filename = `${timestamp}_${randomNumber}${extension}`; // Create filename
-    cb(null, filename); // Return the filename
+    const randomNumber = Math.floor(Math.random() * 10000);
+    const extension = path.extname(file.originalname);
+    const filename = `${timestamp}_${randomNumber}${extension}`;
+    cb(null, filename);
   },
 });
 
 const fileFilter = (req, file, cb) => {
   const allowedFileTypes = [
-    "application/pdf", // PDF files
-    "image/jpeg", // JPEG images
-    "image/png", // PNG images
-    "image/gif", // GIF images
-    "image/bmp", // BMP images
-    "image/tiff", // TIFF images
-    "image/webp", // WebP images
-    "image/svg+xml", // SVG images
-    "image/x-icon", // ICO files
-    "image/heic", // HEIC images
-    "image/heif", // HEIF images
-    "image/apng", // APNG images
-    "application/zip", // ZIP files
+    "application/pdf",
+    "image/jpeg",
+    "image/png",
+    "image/gif",
+    "image/bmp",
+    "image/tiff",
+    "image/webp",
+    "image/svg+xml",
+    "image/x-icon",
+    "image/heic",
+    "image/heif",
+    "image/apng",
+    "application/zip",
     "application/x-zip-compressed",
-    "application/vnd.ms-excel", // Excel files (.xls)
-    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", // Excel files (.xlsx)
-    "text/csv", // CSV files
-    "application/msword", // Word files (.doc)
-    "application/vnd.openxmlformats-officedocument.wordprocessingml.document", // Word files (.docx)
+    "application/vnd.ms-excel",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "text/csv",
+    "application/msword",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
   ];
   if (allowedFileTypes.includes(file.mimetype)) {
-    cb(null, true); // Accept the file
+    cb(null, true);
   } else {
     console.log(`file.mimetype - `, file.mimetype);
     cb(
@@ -88,10 +86,11 @@ const fileFilter = (req, file, cb) => {
 
 const upload = multer({
   storage,
-  limits: { fileSize: 512 * 1024 * 1024 }, // 512 MB limit
+  limits: { fileSize: 512 * 1024 * 1024 },
   fileFilter,
 });
-// Authentication routes
+
+// Vendor routes
 
 router.get("/service-options", csa.vendorServiceOptions);
 router.get("/cases", csa.vendorCaseList);
@@ -100,5 +99,6 @@ router.post("/upload-report", upload.fields([{ name: "image" }]), csa.vendorUplo
 router.post("/verified-date", csa.vendorUpdateVerifiedDate);
 router.post("/verification-status", csa.vendorUpdateVerificationStatus);
 router.post("/complete", csa.vendorCompleteCase);
-router.post("/request-correction", csa.vendorRequestCorrection);
+router.post("/remarks", csa.vendorSaveRemarks);
+
 module.exports = router;

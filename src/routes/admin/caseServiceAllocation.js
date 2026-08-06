@@ -99,5 +99,5 @@ router.post("/attachment", upload.fields([{ name: "attachment" }]), csa.uploadAt
 router.post("/correction/review", csa.reviewCorrection);
 router.post("/upload-access", csa.updateUploadAccess);
 router.post("/verification-status", csa.updateVerificationStatus);
-
+// router.post("/remarks-access", csa.updateRemarksAccess);
 module.exports = router;

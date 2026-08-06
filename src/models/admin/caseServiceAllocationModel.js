@@ -94,9 +94,6 @@ listForAdmin: async (callback) => {
   try {
     const { sqlFragment } = await buildCandidateSelectFragment();
 
-    console.log("========== SQL FRAGMENT ==========");
-    console.log(sqlFragment);
-
     const sql = `
       SELECT
         csa.id AS allocation_id,
@@ -117,6 +114,7 @@ listForAdmin: async (callback) => {
         csa.vendor_verified_date,
         csa.attachment_path,
         csa.attachment_uploaded_at,
+        csa.vendor_remarks,
         ca.id AS main_id,
         ca.application_id,
         ca.employee_id,
@@ -150,25 +148,14 @@ listForAdmin: async (callback) => {
       ORDER BY ca.created_at DESC, csa.id ASC
     `;
 
-    console.log("========== FULL SQL ==========");
-    console.log(sql);
-
     const rows = await sequelize.query(sql, {
       type: QueryTypes.SELECT
     });
-
-    console.log("========== MAIN QUERY RESULT ==========");
-    console.log("Rows count:", rows.length);
-    console.log("Rows:", rows);
 
     const pendingRows = await sequelize.query(
       `SELECT * FROM vendor_correction_requests WHERE status = 'pending'`,
       { type: QueryTypes.SELECT }
     );
-
-    console.log("========== PENDING REQUESTS ==========");
-    console.log("Pending rows:", pendingRows.length);
-    console.log(pendingRows);
 
     const pendingByAllocation = new Map();
 
@@ -185,9 +172,6 @@ listForAdmin: async (callback) => {
 
     const fileHost = await getBackendFileHost();
 
-    console.log("========== FILE HOST ==========");
-    console.log(fileHost);
-
     const applications = rows.map((row) => ({
       ...row,
       vendor_report_url: buildPublicFileUrl(
@@ -202,19 +186,10 @@ listForAdmin: async (callback) => {
         pendingByAllocation.get(row.allocation_id) || [],
     }));
 
-    console.log("========== FINAL APPLICATIONS ==========");
-    console.log("Applications count:", applications.length);
-    console.log(applications);
-
     callback(null, applications);
 
   } catch (error) {
-
-    console.log("========== LIST FOR ADMIN ERROR ==========");
-    console.error(error);
-    console.error("Error message:", error.message);
-    console.error("Error stack:", error.stack);
-
+    console.error("listForAdmin error:", error);
     callback(error, null);
   }
 },
@@ -378,6 +353,7 @@ findForMail: async (allocationId, vendorId, callback) => {
           csa.vendor_report_uploaded_at,
           csa.vendor_verified_date,
           csa.attachment_path,
+          csa.vendor_remarks,
           ca.application_id,
           ca.employee_id,
           ca.name AS applicant_name,
@@ -472,6 +448,19 @@ findForMail: async (allocationId, vendorId, callback) => {
         { replacements: [enabled ? 1 : 0, allocationId], type: QueryTypes.UPDATE }
       );
       callback(null, result);
+    } catch (error) { callback(error, null); }
+  },
+
+  // ── Vendor: save remarks — gated by the SAME vendor_upload_enabled toggle ──
+  saveVendorRemarks: async (vendorId, allocationId, remarks, callback) => {
+    try {
+      const result = await sequelize.query(
+        `UPDATE case_service_allocations
+         SET vendor_remarks = ?
+         WHERE id = ? AND vendor_id = ? AND vendor_case_enabled = 1 AND vendor_upload_enabled = 1`,
+        { replacements: [remarks, allocationId, vendorId], type: QueryTypes.UPDATE }
+      );
+      callback(null, result); // result[1] === 0 → access disabled or not owned by this vendor
     } catch (error) { callback(error, null); }
   },
 
