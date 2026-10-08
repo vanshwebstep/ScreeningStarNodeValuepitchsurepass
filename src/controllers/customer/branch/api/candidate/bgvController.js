@@ -1037,11 +1037,10 @@ exports.submit = (req, res) => {
                                                           .map((email) => ({
                                                             name: customer.name,
                                                             email: email.trim(),
-                                                          }, { name: 'Vansh Webstep', email: 'vanshwebstep@gmail.com' }));
+                                                          }));
 
                                                         const toArr = [
                                                           ...ccArr1,
-
                                                           ...adminList.map((admin) => ({
                                                             name: admin.name,
                                                             email: admin.email,
@@ -1868,3 +1867,7 @@ exports.fetch_report_status = async (req, res) => {
     });
   }
 };
+
+const apiClientController = require("../client/applicationController");
+exports.fetch_insufficiency = apiClientController.fetch_insufficiency;
+exports.fetch_insuff = apiClientController.fetch_insufficiency;

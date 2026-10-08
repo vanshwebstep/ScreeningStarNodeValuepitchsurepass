@@ -597,3 +597,246 @@ exports.upload = async (req, res) => {
         res.status(500).json({ success: false });
     }
 };
+
+const validateToken = async ({ access_token, _token, token, branch_id, customer_id, sub_user_id }) => {
+    const tokenToValidate = access_token || _token || token;
+    if (!tokenToValidate || tokenToValidate === "undefined" || tokenToValidate === "") {
+        return { status: false, errorType: "MISSING", message: "Token is required." };
+    }
+
+    // 1. Try Access Token first
+    try {
+        const accessTokenResult = await new Promise((resolve) => {
+            Branch.getBranchAndCustomerByAccessToken(tokenToValidate, (err, res) => {
+                if (err) return resolve({ status: false, err });
+                resolve(res || { status: false });
+            });
+        });
+
+        if (accessTokenResult && accessTokenResult.status) {
+            const tokenBranch = accessTokenResult.data?.branch;
+            const tokenCustomer = accessTokenResult.data?.customer;
+
+            if (branch_id && tokenBranch && String(tokenBranch.id) !== String(branch_id)) {
+                return { status: false, errorType: "FORBIDDEN", message: "Access token does not match the requested branch." };
+            }
+            if (customer_id && tokenCustomer && String(tokenCustomer.id) !== String(customer_id)) {
+                return { status: false, errorType: "FORBIDDEN", message: "Access token does not match the requested customer." };
+            }
+
+            return {
+                status: true,
+                type: "ACCESS_TOKEN",
+                branch_id: tokenBranch?.id,
+                customer_id: tokenCustomer?.id,
+                branch: tokenBranch,
+                customer: tokenCustomer,
+                token: tokenToValidate,
+            };
+        }
+    } catch (err) {
+        console.error("Access token validation error:", err);
+    }
+
+    // 2. Try Normal Login Token
+    try {
+        if (branch_id) {
+            const normalTokenResult = await new Promise((resolve) => {
+                BranchCommon.isBranchTokenValid(tokenToValidate, sub_user_id || "", branch_id, (err, res) => {
+                    if (err) return resolve({ status: false, err });
+                    resolve(res || { status: false });
+                });
+            });
+
+            if (normalTokenResult && normalTokenResult.status) {
+                return {
+                    status: true,
+                    type: "LOGIN_TOKEN",
+                    branch_id,
+                    newToken: normalTokenResult.newToken || tokenToValidate,
+                };
+            }
+        } else {
+            const { sequelize } = require("../../../../../config/db");
+            const { QueryTypes } = require("sequelize");
+            const branchRows = await sequelize.query(
+                "SELECT id, customer_id FROM branches WHERE login_token = ? LIMIT 1",
+                { replacements: [tokenToValidate], type: QueryTypes.SELECT }
+            );
+
+            if (branchRows && branchRows.length > 0) {
+                return {
+                    status: true,
+                    type: "LOGIN_TOKEN",
+                    branch_id: branchRows[0].id,
+                    customer_id: branchRows[0].customer_id,
+                    token: tokenToValidate,
+                };
+            }
+
+            const subUserRows = await sequelize.query(
+                "SELECT id, branch_id FROM branch_sub_users WHERE login_token = ? LIMIT 1",
+                { replacements: [tokenToValidate], type: QueryTypes.SELECT }
+            );
+
+            if (subUserRows && subUserRows.length > 0) {
+                return {
+                    status: true,
+                    type: "LOGIN_TOKEN",
+                    branch_id: subUserRows[0].branch_id,
+                    sub_user_id: subUserRows[0].id,
+                    token: tokenToValidate,
+                };
+            }
+        }
+    } catch (err) {
+        console.error("Normal token validation error:", err);
+    }
+
+    return {
+        status: false,
+        errorType: "UNAUTHORIZED",
+        message: "Invalid or expired token.",
+    };
+};
+
+exports.fetch_insufficiency = async (req, res) => {
+    try {
+        const rawData = { ...(req.query || {}), ...(req.body || {}) };
+        const authHeader = req.headers["authorization"] || req.headers["x-access-token"] || req.headers["token"];
+        let headerToken = null;
+        if (authHeader) {
+            headerToken = authHeader.startsWith("Bearer ") ? authHeader.substring(7).trim() : authHeader.trim();
+        }
+
+        const access_token = rawData.access_token || rawData._token || rawData.token || headerToken;
+        const application_id = rawData.application_id || rawData.client_application_id || rawData.id;
+        const branch_id = rawData.branch_id;
+        const customer_id = rawData.customer_id;
+        const sub_user_id = rawData.sub_user_id;
+
+        const missingFields = [];
+        if (!access_token || access_token === "undefined" || String(access_token).trim() === "") {
+            missingFields.push("Token");
+        }
+        if (!application_id || application_id === "undefined" || String(application_id).trim() === "") {
+            missingFields.push("Application ID");
+        }
+
+        if (missingFields.length > 0) {
+            return res.status(400).json({
+                status: false,
+                message: `Missing required fields: ${missingFields.join(", ")}`,
+            });
+        }
+
+        const authResult = await validateToken({
+            access_token,
+            _token: access_token,
+            token: access_token,
+            branch_id,
+            customer_id,
+            sub_user_id,
+        });
+
+        if (!authResult.status) {
+            const statusCode = authResult.errorType === "FORBIDDEN" ? 403 : 401;
+            return res.status(statusCode).json({
+                status: false,
+                message: authResult.message || "Authentication failed.",
+            });
+        }
+
+        const authBranchId = authResult.branch_id || branch_id || null;
+        const authCustomerId = authResult.customer_id || customer_id || null;
+
+        ClientApplication.fetchInsufficiency(
+            application_id,
+            authBranchId,
+            authCustomerId,
+            (err, result) => {
+                if (err) {
+                    console.error("Database error during insufficiency fetch:", err);
+                    return res.status(500).json({
+                        status: false,
+                        message: "An error occurred while fetching insufficiency details.",
+                    });
+                }
+
+                if (!result) {
+                    return res.status(404).json({
+                        status: false,
+                        message: "Application does not exist.",
+                    });
+                }
+
+                const isNotEmpty = (val) =>
+                    val !== null &&
+                    val !== undefined &&
+                    String(val).trim() !== "" &&
+                    String(val).trim().toLowerCase() !== "null" &&
+                    String(val).trim().toLowerCase() !== "undefined";
+
+                const hasFirstInsuff =
+                    isNotEmpty(result.first_insufficiency_marks) ||
+                    isNotEmpty(result.first_insuff_date) ||
+                    isNotEmpty(result.first_insuff_reopened_date);
+
+                const hasSecondInsuff =
+                    isNotEmpty(result.second_insufficiency_marks) ||
+                    isNotEmpty(result.second_insuff_date) ||
+                    isNotEmpty(result.second_insuff_reopened_date);
+
+                const hasThirdInsuff =
+                    isNotEmpty(result.third_insufficiency_marks) ||
+                    isNotEmpty(result.third_insuff_date) ||
+                    isNotEmpty(result.third_insuff_reopened_date);
+
+                const hasInsufficiency = hasFirstInsuff || hasSecondInsuff || hasThirdInsuff;
+
+                const responseData = {
+                    client_application_id: result.client_application_id,
+                    application_id: result.application_id,
+                    applicant_name: result.applicant_name,
+                    employee_id: result.employee_id,
+                    first_insufficiency_marks: result.first_insufficiency_marks || null,
+                    first_insuff_date: result.first_insuff_date || null,
+                    first_insuff_reopened_date: result.first_insuff_reopened_date || null,
+                    second_insufficiency_marks: result.second_insufficiency_marks || null,
+                    second_insuff_date: result.second_insuff_date || null,
+                    second_insuff_reopened_date: result.second_insuff_reopened_date || null,
+                    third_insufficiency_marks: result.third_insufficiency_marks || null,
+                    third_insuff_date: result.third_insuff_date || null,
+                    third_insuff_reopened_date: result.third_insuff_reopened_date || null,
+                };
+
+                if (hasInsufficiency) {
+                    return res.status(200).json({
+                        status: true,
+                        message: "Insufficiency details fetched successfully.",
+                        has_insufficiency: true,
+                        data: responseData,
+                        token: authResult.newToken || undefined,
+                    });
+                } else {
+                    return res.status(200).json({
+                        status: true,
+                        message: "No insufficiency yet.",
+                        has_insufficiency: false,
+                        data: responseData,
+                        token: authResult.newToken || undefined,
+                    });
+                }
+            }
+        );
+    } catch (error) {
+        console.error("Unexpected error in fetch_insufficiency:", error);
+        return res.status(500).json({
+            status: false,
+            message: "Internal server error.",
+        });
+    }
+};
+
+exports.fetch_insuff = exports.fetch_insufficiency;
+

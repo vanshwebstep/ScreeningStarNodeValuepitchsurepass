@@ -1,615 +1,300 @@
-const { sequelize } = require("../../config/db");
-const { QueryTypes } = require("sequelize");
-const moment = require("moment");
-const App = require("../appModel");
-
-const parseJson = (value, fallback) => {
-  try {
-    if (value === null || value === undefined || value === "") return fallback;
-    return typeof value === "string" ? JSON.parse(value) : value;
-  } catch {
-    return fallback;
-  }
-};
-
-const normalizeServices = (services) => JSON.stringify(parseJson(services, []));
-const normalizeDetails = (details) => JSON.stringify(parseJson(details, {}));
-const activeVendorClause = "(is_deleted IS NULL OR is_deleted != 1)";
-const deletedVendorClause = "is_deleted = 1";
-const normalizeFileHost = (host) => {
-  const cleanHost = String(host || "").trim().replace(/\\/g, "/").replace(/\/+$/, "");
-  if (!cleanHost) return "";
-  return /^https?:\/\//i.test(cleanHost) ? cleanHost : `https://${cleanHost}`;
-};
-
-const buildPublicFileUrl = (filePath, host) => {
-  if (!filePath) return null;
-  const rawPath = String(filePath).trim();
-  if (!rawPath) return null;
-  if (/^https?:\/\//i.test(rawPath)) return rawPath.replace(/\\/g, "/");
-  const cleanPath = rawPath.replace(/\\/g, "/").replace(/^\/+/, "");
-  const baseHost = normalizeFileHost(host) || "http://localhost:5000";
-  return `${baseHost}/${cleanPath}`;
-};
-
-const getBackendFileHost = () =>
-  new Promise((resolve) => {
-    App.appInfo("backend", (err, appInfo) => {
-      if (err) console.error("Error fetching backend app info:", err);
-      resolve((appInfo && (appInfo.cloud_host || appInfo.host)) || "");
-    });
-  });
-
-const toReportMoment = (value) => {
-  const text = String(value || "").trim();
-  if (!text || text === "0000-00-00" || text.startsWith("0000-00-00")) return null;
-  const date = moment(text).startOf("day");
-  return date.isValid() ? date : null;
-};
-
-const isWorkingDay = (date, holidayDates, weekendsSet) => (
-  !weekendsSet.has(date.format("dddd").toLowerCase()) &&
-  !holidayDates.has(date.format("YYYY-MM-DD"))
-);
-
-const calculateDueDate = (startDate, tatDays, holidayDates, weekendsSet) => {
-  const dueDate = startDate.clone().startOf("day");
-  let daysRemaining = parseInt(tatDays || 0, 10);
-  daysRemaining = Number.isNaN(daysRemaining) ? 0 : Math.max(daysRemaining, 0);
-
-  while (daysRemaining > 0) {
-    dueDate.add(1, "day");
-    if (isWorkingDay(dueDate, holidayDates, weekendsSet)) daysRemaining--;
-  }
-
-  return dueDate;
-};
-
-const countWorkingDaysAfterStart = (startDate, endDate, holidayDates, weekendsSet) => {
-  if (!startDate || !endDate || endDate.isSameOrBefore(startDate, "day")) return 0;
-  let count = 0;
-  const currentDate = startDate.clone().startOf("day");
-
-  while (currentDate.isBefore(endDate, "day")) {
-    currentDate.add(1, "day");
-    if (isWorkingDay(currentDate, holidayDates, weekendsSet)) count++;
-  }
-
-  return count;
-};
-
-const calculateVendorTat = (row, holidayDates, weekendsSet) => {
-  const startDate = toReportMoment(row.initiation_date) || toReportMoment(row.created_at);
-  const reportDate = toReportMoment(row.vendor_verified_date) || toReportMoment(row.vendor_report_uploaded_at) || toReportMoment(row.report_date);
-  if (!startDate || !reportDate) {
-    return { tat_elapsed_days: 0, in_tat_days: 0, out_of_tat_days: 0 };
-  }
-
-  const dueDate = toReportMoment(row.deadline_date) || calculateDueDate(startDate, row.tat_days, holidayDates, weekendsSet);
-  const elapsedWorkingDays = countWorkingDaysAfterStart(startDate, reportDate, holidayDates, weekendsSet);
-  const outOfTatDays = reportDate.isAfter(dueDate, "day")
-    ? countWorkingDaysAfterStart(dueDate, reportDate, holidayDates, weekendsSet)
-    : 0;
-
-  return {
-    tat_elapsed_days: elapsedWorkingDays,
-    in_tat_days: outOfTatDays > 0 ? 0 : elapsedWorkingDays,
-    out_of_tat_days: outOfTatDays,
-  };
-};
-
-const archivedEmail = (id, seed = Date.now()) => `deleted_${id}_${seed}@deleted.local`;
-const archivedVendorCode = (id, seed = Date.now()) => `DEL-${id}-${seed}`;
-
-const retireDeletedUniqueConflicts = async (data) => {
-  const email = String(data.email_id || "").trim().toLowerCase();
-  const vendorCode = String(data.vendor_code || "").trim();
-  if (!email && !vendorCode) return;
-
-  const rows = await sequelize.query(
-    `SELECT id, email_id, vendor_code
-     FROM vendor_managements
-     WHERE ${deletedVendorClause}
-       AND (LOWER(email_id) = LOWER(?) OR vendor_code = ?)`,
-    { replacements: [email, vendorCode], type: QueryTypes.SELECT }
-  );
-
-  for (const row of rows) {
-    const seed = `${Date.now()}${row.id}`;
-    const nextEmail = String(row.email_id || "").toLowerCase() === email
-      ? archivedEmail(row.id, seed)
-      : row.email_id;
-    const nextVendorCode = String(row.vendor_code || "") === vendorCode
-      ? archivedVendorCode(row.id, seed)
-      : row.vendor_code;
-
-    await sequelize.query(
-      `UPDATE vendor_managements
-       SET email_id = ?, vendor_code = ?
-       WHERE id = ? AND ${deletedVendorClause}`,
-      { replacements: [nextEmail, nextVendorCode, row.id], type: QueryTypes.UPDATE }
-    );
-  }
-};
-
-const publicColumns = `
-  id, admin_id, name_of_organization, vendor_code, registered_address, state, pin_code,
-  gst, tat, agreement_date, email_id, services, vendor_spoc, escalation_manager,
-  authorized_details, status, created_at, updated_at
-`;
-const vendorCaseColumns = {
-  vendor_case_status: "VARCHAR(50) NULL DEFAULT 'assigned'",
-  vendor_case_enabled: "TINYINT(1) NOT NULL DEFAULT 1",
-  vendor_accepted_at: "DATETIME NULL",
-  vendor_report_path: "TEXT NULL",
-  vendor_report_uploaded_at: "DATETIME NULL",
-  vendor_verified_date: "DATE NULL",
-};
-
-const ensureVendorCaseColumns = async () => {
-  const columnResults = await sequelize.query("SHOW COLUMNS FROM client_applications", {
-    type: QueryTypes.SELECT,
-  });
-  const existingColumns = columnResults.map((column) => column.Field);
-
-  for (const [column, definition] of Object.entries(vendorCaseColumns)) {
-    if (!existingColumns.includes(column)) {
-      await sequelize.query(
-        `ALTER TABLE \`client_applications\` ADD COLUMN \`${column}\` ${definition}`,
-        { type: QueryTypes.RAW }
-      );
-    }
-  }
-};
-
-const vendorCaseBaseSelect = `
-  SELECT
-    ca.id,
-    ca.id AS main_id,
-    ca.application_id,
-    ca.employee_id,
-    ca.case_id,
-    ca.check_id,
-    ca.ticket_id,
-    ca.name,
-    ca.gender,
-    ca.location,
-    ca.sub_client,
-    ca.client_spoc_name AS screeningstar_spoc,
-    ca.created_at,
-    ca.vendor_id,
-    ca.vendor_name,
-    ca.vendor_code,
-    ca.vendor_case_status,
-    ca.vendor_case_enabled,
-    ca.vendor_accepted_at,
-    ca.vendor_report_path,
-    ca.vendor_report_uploaded_at,
-    ca.vendor_verified_date,
-    c.name AS customer_name,
-    c.client_unique_id,
-    b.name AS branch_name,
-    cm.tat_days,
-    cm.client_spoc_name,
-    vm.vendor_spoc,
-    cmt.initiation_date,
-    cmt.deadline_date,
-    cmt.first_insufficiency_marks,
-    cmt.first_insuff_date,
-    cmt.second_insufficiency_marks,
-    cmt.second_insuff_date,
-    cmt.third_insufficiency_marks,
-    cmt.third_insuff_date,
-    cmt.final_verification_status,
-    cmt.dob,
-    cmt.report_date,
-    cmt.report_status,
-    cmt.overall_status,
-    GROUP_CONCAT(DISTINCT s.title ORDER BY s.title SEPARATOR ', ') AS service_names
-  FROM client_applications ca
-  LEFT JOIN customers c ON c.id = ca.customer_id
-  LEFT JOIN branches b ON b.id = ca.branch_id
-  LEFT JOIN customer_metas cm ON cm.customer_id = ca.customer_id
-  LEFT JOIN vendor_managements vm ON vm.id = ca.vendor_id
-  LEFT JOIN cmt_applications cmt ON cmt.client_application_id = ca.id
-  LEFT JOIN services s ON FIND_IN_SET(s.id, ca.services)
-`;
-
-const vendorCaseStatusWhere = (status) => {
-  const normalized = String(status || "assigned").toLowerCase();
-  if (normalized === "completed") {
-    return "AND LOWER(COALESCE(ca.vendor_case_status, 'assigned')) = 'completed'";
-  }
-  if (normalized === "accepted") {
-    return "AND LOWER(COALESCE(ca.vendor_case_status, 'assigned')) = 'accepted'";
-  }
-  return "AND LOWER(COALESCE(ca.vendor_case_status, 'assigned')) = 'assigned'";
-};
+const { pool, startConnection, connectionRelease } = require("../../config/db");
 
 const Vendor = {
-  create: async (data, callback) => {
-    try {
-      await retireDeletedUniqueConflicts(data);
-      const sql = `
-        INSERT INTO vendor_managements (
-          admin_id, name_of_organization, vendor_code, registered_address, state, pin_code,
-          gst, tat, agreement_date, email_id, password, services,
-          vendor_spoc, escalation_manager, authorized_details
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `;
-      const result = await sequelize.query(sql, {
-        replacements: [
-          data.admin_id,
-          data.name_of_organization,
-          data.vendor_code,
-          data.registered_address,
-          data.state,
-          data.pin_code,
-          data.gst || null,
-          data.tat,
-          data.agreement_date,
-          data.email_id,
-          data.password,
-          normalizeServices(data.services),
-          normalizeDetails(data.vendor_spoc),
-          normalizeDetails(data.escalation_manager),
-          normalizeDetails(data.authorized_details),
-        ],
-        type: QueryTypes.INSERT,
-      });
-      callback(null, { insertId: result[0] });
-    } catch (error) {
-      callback(error, null);
-    }
-  },
+    create: (
+        data,
+        callback
+    ) => {
+        const tableName = "vendors";
+        const columns = Object.keys(data);
+        const values = Object.values(data);
 
-  update: async (id, data, callback) => {
-    try {
-      await retireDeletedUniqueConflicts(data);
-      const sql = `
-        UPDATE vendor_managements SET
-          name_of_organization = ?, vendor_code = ?, registered_address = ?, state = ?, pin_code = ?,
-          gst = ?, tat = ?, agreement_date = ?, email_id = ?, password = COALESCE(NULLIF(?, ''), password), services = ?,
-          vendor_spoc = ?, escalation_manager = ?, authorized_details = ?
-        WHERE id = ? AND ${activeVendorClause}
-      `;
-      const result = await sequelize.query(sql, {
-        replacements: [
-          data.name_of_organization,
-          data.vendor_code,
-          data.registered_address,
-          data.state,
-          data.pin_code,
-          data.gst || null,
-          data.tat,
-          data.agreement_date,
-          data.email_id,
-          data.password,
-          normalizeServices(data.services),
-          normalizeDetails(data.vendor_spoc),
-          normalizeDetails(data.escalation_manager),
-          normalizeDetails(data.authorized_details),
-          id,
-        ],
-        type: QueryTypes.UPDATE,
-      });
-      callback(null, result);
-    } catch (error) {
-      callback(error, null);
-    }
-  },
+        startConnection((err, connection) => {
+            if (err) {
+                console.error("Connection error:", err);
+                return callback(err, null);
+            }
+            // Step 1: Check if the table exists
+            const checkTableSql = `
+                SELECT COUNT(*) AS tableCount
+                FROM information_schema.tables
+                WHERE table_schema = DATABASE() AND table_name = ?
+            `;
+            connection.query(checkTableSql, [tableName], (tableErr, tableResults) => {
+                if (tableErr) {
+                    
+                    console.error("Database query error: 1", tableErr);
+                    return callback(tableErr, null);
+                }
 
-  list: async (statusFilter, callback) => {
-    try {
-      let statusClause = "";
-      const replacements = [];
-      const normalizedStatus = String(statusFilter || "all").toLowerCase();
-      if (normalizedStatus === "active") {
-        statusClause = " AND status = ?";
-        replacements.push(1);
-      } else if (normalizedStatus === "inactive") {
-        statusClause = " AND status = ?";
-        replacements.push(0);
-      }
+                const tableExists = tableResults[0].tableCount > 0;
 
-      const rows = await sequelize.query(
-        `SELECT ${publicColumns} FROM vendor_managements WHERE ${activeVendorClause}${statusClause} ORDER BY created_at DESC`,
-        { replacements, type: QueryTypes.SELECT }
-      );
-      callback(null, rows);
-    } catch (error) {
-      callback(error, null);
-    }
-  },
+                const createTableSql = `CREATE TABLE \`${tableName}\` (
+                    \`id\` int NOT NULL AUTO_INCREMENT,
+                    \`admin_id\` int NOT NULL,
+                    \`created_at\` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    \`updated_at\` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                    PRIMARY KEY (\`id\`),
+                    KEY \`${tableName}_fk_admin_id\` (\`admin_id\`),
+                    CONSTRAINT \`${tableName}_fk_admin_id\` FOREIGN KEY (\`admin_id\`) REFERENCES \`admins\` (\`id\`) ON DELETE CASCADE ON UPDATE RESTRICT
+                  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;`;
 
-  findById: async (id, callback) => {
-    try {
-      const rows = await sequelize.query(
-        `SELECT ${publicColumns}, login_token, token_expiry FROM vendor_managements WHERE id = ? AND ${activeVendorClause} LIMIT 1`,
-        { replacements: [id], type: QueryTypes.SELECT }
-      );
-      callback(null, rows[0] || null);
-    } catch (error) {
-      callback(error, null);
-    }
-  },
-  updateStatus: async (id, status, callback) => {
-    try {
-      const result = await sequelize.query(
-        `UPDATE vendor_managements SET status = ? WHERE id = ? AND ${activeVendorClause}`,
-        { replacements: [Number(status) === 1 ? 1 : 0, id], type: QueryTypes.UPDATE }
-      );
-      callback(null, result);
-    } catch (error) {
-      callback(error, null);
-    }
-  },
+                const ensureTable = tableExists
+                    ? Promise.resolve()
+                    : new Promise((resolve, reject) => {
+                        connection.query(createTableSql, (createErr) => {
+                            if (createErr) {
+                                console.error("Error creating table:", createErr);
+                                reject(createErr);
+                            } else {
+                                resolve();
+                            }
+                        });
+                    });
 
+                ensureTable
+                    .then(() => {
+                        // Step 3: Check and add missing columns
+                        const checkColumnsSql = `SHOW COLUMNS FROM \`${tableName}\``;
 
-  findByEmail: async (email, callback) => {
-    try {
-      const rows = await sequelize.query(
-        `SELECT ${publicColumns}, password, login_token, token_expiry, status FROM vendor_managements WHERE LOWER(email_id) = LOWER(?) AND ${activeVendorClause} LIMIT 1`,
-        { replacements: [email], type: QueryTypes.SELECT }
-      );
-      callback(null, rows[0] || null);
-    } catch (error) {
-      callback(error, null);
-    }
-  },
+                        return new Promise((resolve, reject) => {
+                            connection.query(checkColumnsSql, (columnErr, columnResults) => {
+                                if (columnErr) {
+                                    console.error("Error checking columns:", columnErr);
+                                    return reject(columnErr);
+                                }
 
-  isVendorCodeUsed: async (vendorCode, ignoreId, callback) => {
-    try {
-      const replacements = [vendorCode];
-      let sql = `SELECT COUNT(*) AS count FROM vendor_managements WHERE vendor_code = ? AND ${activeVendorClause}`;
-      if (ignoreId) {
-        sql += " AND id != ?";
-        replacements.push(ignoreId);
-      }
-      const rows = await sequelize.query(sql, { replacements, type: QueryTypes.SELECT });
-      callback(null, Number(rows[0]?.count || 0) > 0);
-    } catch (error) {
-      callback(error, null);
-    }
-  },
+                                const existingColumns = columnResults.map((column) => column.Field);
+                                const missingColumns = columns.filter((column) => !existingColumns.includes(column));
+                                const alterTablePromises = missingColumns.map((column) => {
+                                    const alterTableSql = `
+                                        ALTER TABLE \`${tableName}\`
+                                        ADD COLUMN \`${column}\` TEXT
+                                    `;
+                                    return new Promise((resolve, reject) => {
+                                        connection.query(alterTableSql, (alterErr) => {
+                                            if (alterErr) {
+                                                console.error(`Error adding column ${column}:`, alterErr);
+                                                return reject(alterErr);
+                                            }
+                                            resolve();
+                                        });
+                                    });
+                                });
 
-  isEmailUsed: async (email, ignoreId, callback) => {
-    try {
-      const replacements = [email];
-      let sql = `SELECT COUNT(*) AS count FROM vendor_managements WHERE LOWER(email_id) = LOWER(?) AND ${activeVendorClause}`;
-      if (ignoreId) {
-        sql += " AND id != ?";
-        replacements.push(ignoreId);
-      }
-      const rows = await sequelize.query(sql, { replacements, type: QueryTypes.SELECT });
-      callback(null, Number(rows[0]?.count || 0) > 0);
-    } catch (error) {
-      callback(error, null);
-    }
-  },
+                                Promise.all(alterTablePromises)
+                                    .then(() => resolve())
+                                    .catch((err) => reject(err));
+                            });
+                        });
+                    })
+                    .then(() => {
+                        const insertServiceSql = `
+                            INSERT INTO \`${tableName}\` (${columns.map((col) => `\`${col}\``).join(", ")})
+                            VALUES (${columns.map(() => "?").join(", ")})
+                        `;
 
-  updateLoginToken: async (id, token, tokenExpiry, callback) => {
-    try {
-      await sequelize.query(
-        `UPDATE vendor_managements SET login_token = ?, token_expiry = ? WHERE id = ? AND ${activeVendorClause}`,
-        { replacements: [token, tokenExpiry, id], type: QueryTypes.UPDATE }
-      );
-      callback(null, true);
-    } catch (error) {
-      callback(error, null);
-    }
-  },
-  updatePassword: async (id, password, callback) => {
-    try {
-      await sequelize.query(
-        `UPDATE vendor_managements
-         SET password = ?, login_token = NULL, token_expiry = NULL
-         WHERE id = ? AND ${activeVendorClause}`,
-        { replacements: [password, id], type: QueryTypes.UPDATE }
-      );
-      callback(null, true);
-    } catch (error) {
-      callback(error, null);
-    }
-  },
+                        connection.query(insertServiceSql, values, (insertErr, results) => {
+                             // Release the connection
+                            if (insertErr) {
+                                console.error("Database query error: Insert", insertErr);
+                                return callback(insertErr, null);
+                            }
+                            callback(null, results);
+                        });
+                    })
+                    .catch((err) => {
+                        
+                        console.error("Database query error: Ensure table/columns", err);
+                        callback(err, null);
+                    });
+            });
+        });
+    },
 
-  updateDashboardPassword: async (id, password, callback) => {
-    try {
-      await sequelize.query(
-        `UPDATE vendor_managements
-         SET password = ?
-         WHERE id = ? AND ${activeVendorClause}`,
-        { replacements: [password, id], type: QueryTypes.UPDATE }
-      );
-      callback(null, true);
-    } catch (error) {
-      callback(error, null);
-    }
-  },
+    update: (
+        vendor_id,
+        data,
+        callback
+    ) => {
+        const tableName = "vendors";
+        const columns = Object.keys(data);
+        const values = Object.values(data);
 
+        startConnection((err, connection) => {
+            if (err) {
+                console.error("Connection error:", err);
+                return callback(err, null);
+            }
 
-  findCaseForMail: async (clientApplicationId, vendorId, callback) => {
-    try {
-      await ensureVendorCaseColumns();
-      const replacements = [clientApplicationId];
-      let vendorFilter = "";
-      if (vendorId) {
-        vendorFilter = " AND ca.vendor_id = ?";
-        replacements.push(vendorId);
-      }
+            // Step 1: Check if the table exists
+            const checkTableSql = `
+                SELECT COUNT(*) AS tableCount
+                FROM information_schema.tables
+                WHERE table_schema = DATABASE() AND table_name = ?
+            `;
 
-      const rows = await sequelize.query(
-        `SELECT
-           ca.*,
-           ca.id AS main_id,
-           c.name AS customer_name,
-           c.client_unique_id,
-           b.name AS branch_name,
-           cm.tat_days,
-           cm.client_spoc_name,
-           vm.name_of_organization AS vendor_organization_name,
-           vm.email_id AS vendor_email_id,
-           vm.vendor_spoc,
-           allocated_admin.name AS allocated_admin_name,
-           allocated_admin.email AS allocated_admin_email,
-           cmt.initiation_date,
-           cmt.deadline_date,
-           cmt.dob,
-           cmt.report_date,
-           cmt.overall_status,
-           GROUP_CONCAT(DISTINCT s.title ORDER BY s.title SEPARATOR ', ') AS service_names
-         FROM client_applications ca
-         LEFT JOIN customers c ON c.id = ca.customer_id
-         LEFT JOIN branches b ON b.id = ca.branch_id
-         LEFT JOIN customer_metas cm ON cm.customer_id = ca.customer_id
-         LEFT JOIN vendor_managements vm ON vm.id = ca.vendor_id
-         LEFT JOIN admins allocated_admin ON allocated_admin.id = ca.vendor_allocated_by
-         LEFT JOIN cmt_applications cmt ON cmt.client_application_id = ca.id
-         LEFT JOIN services s ON FIND_IN_SET(s.id, ca.services)
-         WHERE ca.id = ?
-           ${vendorFilter}
-           AND ca.is_deleted != 1
-         GROUP BY ca.id
-         LIMIT 1`,
-        { replacements, type: QueryTypes.SELECT }
-      );
-      callback(null, rows[0] || null);
-    } catch (error) {
-      callback(error, null);
-    }
-  },
-  listCases: async (vendorId, status, callback) => {
-    try {
-      await ensureVendorCaseColumns();
-      const sql = `
-        ${vendorCaseBaseSelect}
-        WHERE ca.vendor_id = ?
-          AND ca.is_deleted != 1
-          AND (c.is_deleted IS NULL OR c.is_deleted != 1)
-          ${vendorCaseStatusWhere(status)}
-        GROUP BY ca.id
-        ORDER BY COALESCE(cmt.initiation_date, ca.created_at) DESC, ca.id DESC
-      `;
-      const rows = await sequelize.query(sql, {
-        replacements: [vendorId],
-        type: QueryTypes.SELECT,
-      });
-      const [fileHost, holidayRows, weekendRows] = await Promise.all([
-        getBackendFileHost(),
-        sequelize.query("SELECT date AS holiday_date FROM holidays", { type: QueryTypes.SELECT }),
-        sequelize.query("SELECT weekends FROM company_info WHERE status = 1 LIMIT 1", { type: QueryTypes.SELECT }),
-      ]);
-      const holidayDates = new Set(holidayRows.map((holiday) => moment(holiday.holiday_date).format("YYYY-MM-DD")));
-      const weekendsSet = new Set(parseJson(weekendRows[0]?.weekends, []).map((day) => String(day).toLowerCase()));
-      const cases = rows.map((row) => ({
-        ...row,
-        ...calculateVendorTat(row, holidayDates, weekendsSet),
-        vendor_report_url: buildPublicFileUrl(row.vendor_report_path, fileHost),
-      }));
-      callback(null, cases);
-    } catch (error) {
-      callback(error, null);
-    }
-  },
+            connection.query(checkTableSql, [tableName], (tableErr, tableResults) => {
+                if (tableErr) {
+                    
+                    console.error("Database query error (check table):", tableErr);
+                    return callback(tableErr, null);
+                }
 
-  acceptCase: async (vendorId, clientApplicationId, callback) => {
-    try {
-      await ensureVendorCaseColumns();
-      const result = await sequelize.query(
-        `UPDATE client_applications
-         SET vendor_case_status = 'accepted', vendor_accepted_at = NOW()
-         WHERE id = ? AND vendor_id = ? AND vendor_case_enabled = 1 AND is_deleted != 1`,
-        { replacements: [clientApplicationId, vendorId], type: QueryTypes.UPDATE }
-      );
-      callback(null, result);
-    } catch (error) {
-      callback(error, null);
-    }
-  },
+                const tableExists = tableResults[0].tableCount > 0;
+                const createTableSql = `CREATE TABLE \`${tableName}\` (
+                    \`id\` int NOT NULL AUTO_INCREMENT,
+                    \`admin_id\` int NOT NULL,
+                    \`created_at\` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    \`updated_at\` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                    PRIMARY KEY (\`id\`),
+                    KEY \`${tableName}_fk_admin_id\` (\`admin_id\`),
+                    CONSTRAINT \`${tableName}_fk_admin_id\` FOREIGN KEY (\`admin_id\`) REFERENCES \`admins\` (\`id\`) ON DELETE CASCADE ON UPDATE RESTRICT
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;`;
 
+                const ensureTable = tableExists
+                    ? Promise.resolve()
+                    : new Promise((resolve, reject) => {
+                        connection.query(createTableSql, (createErr) => {
+                            if (createErr) {
+                                console.error("Error creating table:", createErr);
+                                reject(createErr);
+                            } else {
+                                resolve();
+                            }
+                        });
+                    });
 
-  completeCase: async (vendorId, clientApplicationId, callback) => {
-    try {
-      await ensureVendorCaseColumns();
-      const result = await sequelize.query(
-        `UPDATE client_applications
-         SET vendor_case_status = 'completed'
-         WHERE id = ?
-           AND vendor_id = ?
-           AND vendor_case_enabled = 1
-           AND is_deleted != 1
-           AND vendor_report_path IS NOT NULL
-           AND TRIM(vendor_report_path) != ''
-           AND vendor_verified_date IS NOT NULL
-           AND TRIM(vendor_verified_date) != ''`,
-        { replacements: [clientApplicationId, vendorId], type: QueryTypes.UPDATE }
-      );
-      callback(null, result);
-    } catch (error) {
-      callback(error, null);
-    }
-  },
-  saveCaseReport: async (vendorId, clientApplicationId, reportPath, callback) => {
-    try {
-      await ensureVendorCaseColumns();
-      const result = await sequelize.query(
-        `UPDATE client_applications
-         SET vendor_report_path = ?, vendor_report_uploaded_at = NOW()
-         WHERE id = ? AND vendor_id = ? AND vendor_case_enabled = 1 AND is_deleted != 1`,
-        { replacements: [reportPath, clientApplicationId, vendorId], type: QueryTypes.UPDATE }
-      );
-      callback(null, result);
-    } catch (error) {
-      callback(error, null);
-    }
-  },
+                ensureTable
+                    .then(() => {
+                        // Step 2: Check and add missing columns
+                        const checkColumnsSql = `SHOW COLUMNS FROM \`${tableName}\``;
 
-  updateVerifiedDate: async (vendorId, clientApplicationId, verifiedDate, callback) => {
-    try {
-      await ensureVendorCaseColumns();
-      const result = await sequelize.query(
-        `UPDATE client_applications
-         SET vendor_verified_date = ?
-         WHERE id = ? AND vendor_id = ? AND vendor_case_enabled = 1 AND is_deleted != 1`,
-        { replacements: [verifiedDate || null, clientApplicationId, vendorId], type: QueryTypes.UPDATE }
-      );
-      callback(null, result);
-    } catch (error) {
-      callback(error, null);
-    }
-  },
+                        return new Promise((resolve, reject) => {
+                            connection.query(checkColumnsSql, (columnErr, columnResults) => {
+                                if (columnErr) {
+                                    console.error("Error checking columns:", columnErr);
+                                    return reject(columnErr);
+                                }
 
-  updateCaseAccess: async (clientApplicationId, enabled, callback) => {
-    try {
-      await ensureVendorCaseColumns();
-      const result = await sequelize.query(
-        `UPDATE client_applications SET vendor_case_enabled = ? WHERE id = ? AND is_deleted != 1`,
-        { replacements: [enabled ? 1 : 0, clientApplicationId], type: QueryTypes.UPDATE }
-      );
-      callback(null, result);
-    } catch (error) {
-      callback(error, null);
-    }
-  },
-  delete: async (id, callback) => {
-    try {
-      const seed = `${Date.now()}${id}`;
-      const result = await sequelize.query(
-        `UPDATE vendor_managements
-         SET is_deleted = 1,
-             deleted_at = NOW(),
-             login_token = NULL,
-             token_expiry = NULL,
-             email_id = ?,
-             vendor_code = ?
-         WHERE id = ? AND ${activeVendorClause}`,
-        { replacements: [archivedEmail(id, seed), archivedVendorCode(id, seed), id], type: QueryTypes.UPDATE }
-      );
-      callback(null, result);
-    } catch (error) {
-      callback(error, null);
-    }
-  },
+                                const existingColumns = columnResults.map((column) => column.Field);
+                                const missingColumns = columns.filter((column) => !existingColumns.includes(column));
+
+                                const alterTablePromises = missingColumns.map((column) => {
+                                    const alterTableSql = `ALTER TABLE \`${tableName}\` ADD COLUMN \`${column}\` TEXT`;
+
+                                    return new Promise((resolve, reject) => {
+                                        connection.query(alterTableSql, (alterErr) => {
+                                            if (alterErr) {
+                                                console.error(`Error adding column ${column}:`, alterErr);
+                                                return reject(alterErr);
+                                            }
+                                            resolve();
+                                        });
+                                    });
+                                });
+
+                                Promise.all(alterTablePromises)
+                                    .then(() => resolve())
+                                    .catch((err) => reject(err));
+                            });
+                        });
+                    })
+                    .then(() => {
+                        // Step 3: Update data
+                        const updateServiceSql = `
+                            UPDATE \`${tableName}\`
+                            SET ${columns.map((col) => `\`${col}\` = ?`).join(", ")}
+                            WHERE id = ?
+                        `;
+
+                        connection.query(updateServiceSql, [...values, vendor_id], (updateErr, results) => {
+                            
+                            if (updateErr) {
+                                console.error("Database query error (update):", updateErr);
+                                return callback(updateErr, null);
+                            }
+                            callback(null, results);
+                        });
+                    })
+                    .catch((err) => {
+                        
+                        console.error("Database query error (ensure table/columns):", err);
+                        callback(err, null);
+                    });
+            });
+        });
+    },
+
+    findById: (id, callback) => {
+        const sql = `SELECT * FROM \`vendors\` WHERE \`id\` = ?`;
+
+        startConnection((err, connection) => {
+            if (err) {
+                return callback(err, null);
+            }
+
+            connection.query(sql, [id], (queryErr, results) => {
+                 // Release the connection
+
+                if (queryErr) {
+                    console.error("Database query error: 47", queryErr);
+                    return callback(queryErr, null);
+                }
+
+                // If no record is found, return `null`
+                if (!results || results.length === 0) {
+                    return callback(null, null);
+                }
+
+                callback(null, results[0]);
+            });
+        });
+    },
+
+    list: (callback) => {
+        const sql = `SELECT v.*, av.name FROM \`vendors\` v INNER JOIN \`admins\` av ON v.admin_id = av.id`;
+
+        startConnection((err, connection) => {
+            if (err) {
+                return callback(err, null);
+            }
+
+            connection.query(sql, (queryErr, results) => {
+                 // Release the connection
+
+                if (queryErr) {
+                    console.error("Database query error: 47", queryErr);
+                    return callback(queryErr, null);
+                }
+
+                callback(null, results);
+            });
+        });
+    },
+
+    delete: (id, callback) => {
+        const sql = `
+          DELETE FROM \`vendors\`
+          WHERE \`id\` = ?
+        `;
+
+        startConnection((err, connection) => {
+            if (err) {
+                return callback(err, null);
+            }
+
+            connection.query(sql, [id], (queryErr, results) => {
+                 // Release the connection
+
+                if (queryErr) {
+                    console.error("Database query error: 8", queryErr);
+                    return callback(queryErr, null);
+                }
+                callback(null, results);
+            });
+        });
+    },
 };
 
 module.exports = Vendor;

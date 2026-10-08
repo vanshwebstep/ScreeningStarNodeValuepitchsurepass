@@ -13,7 +13,6 @@ exports.create = (req, res) => {
     service_code,
     service_type,
     hsn_code,
-    show_in_vendor_management,
     admin_id,
     _token,
   } = req.body;
@@ -64,7 +63,6 @@ exports.create = (req, res) => {
         service_code,
         service_type,
         hsn_code,
-        show_in_vendor_management,
         admin_id,
         (err, result) => {
           if (err) {
@@ -343,7 +341,6 @@ exports.update = (req, res) => {
     service_type,
     service_code,
     hsn_code,
-    show_in_vendor_management,
     admin_id,
     _token,
   } = req.body;
@@ -418,7 +415,6 @@ exports.update = (req, res) => {
           service_type,
           service_code,
           hsn_code,
-          show_in_vendor_management,
           (err, result) => {
             if (err) {
               console.error("Database error:", err);

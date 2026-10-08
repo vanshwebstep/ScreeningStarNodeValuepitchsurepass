@@ -554,3 +554,7 @@ exports.fetch_bgv_pdf = async (req, res) => {
     });
   }
 };
+
+const apiClientController = require("../client/applicationController");
+exports.fetch_insufficiency = apiClientController.fetch_insufficiency;
+exports.fetch_insuff = apiClientController.fetch_insufficiency;

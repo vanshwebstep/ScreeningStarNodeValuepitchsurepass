@@ -1901,3 +1901,7 @@ exports.createClientAppListings = (req, res) => {
     );
   });
 };
+
+const apiClientController = require("../api/client/applicationController");
+exports.fetch_insufficiency = apiClientController.fetch_insufficiency;
+exports.fetch_insuff = apiClientController.fetch_insufficiency;

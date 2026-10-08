@@ -3,10 +3,6 @@ const router = express.Router();
 const clientMasterTrackerController = require("../../controllers/admin/clientMasterTrackerController");
 
 // Authentication routes
-router.get("/vendor-allocation-list", clientMasterTrackerController.vendorAllocationList);
-router.post("/allocate-vendor", clientMasterTrackerController.allocateVendor);
-router.post("/allocate-vendor-bulk", clientMasterTrackerController.allocateVendorBulk);
-router.post("/vendor-case-access", clientMasterTrackerController.updateVendorCaseAccess);
 router.get("/list", clientMasterTrackerController.list);
 router.get("/list-valuepitch", clientMasterTrackerController.listValuePitch);
 
@@ -60,4 +56,3 @@ router.get("/fetch-value-pitch-report-data", clientMasterTrackerController.value
 router.get("/fetch-surepass-data", clientMasterTrackerController.surePassData);
 
 module.exports = router;
-

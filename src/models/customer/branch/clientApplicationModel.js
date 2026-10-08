@@ -779,6 +779,69 @@ listAllApplications: async (branch_id, callback) => {
       });
   },
 
+  fetchInsufficiency: async (application_id_or_id, branch_id, customer_id, callback) => {
+    try {
+      let sql = `
+        SELECT 
+          ca.id AS client_application_id,
+          ca.application_id,
+          ca.name AS applicant_name,
+          ca.employee_id,
+          ca.branch_id,
+          ca.customer_id,
+          ca.status AS application_status,
+          c.name AS customer_name,
+          b.name AS branch_name,
+          cmt.id AS cmt_id,
+          cmt.first_insufficiency_marks,
+          cmt.first_insuff_date,
+          cmt.first_insuff_reopened_date,
+          cmt.second_insufficiency_marks,
+          cmt.second_insuff_date,
+          cmt.second_insuff_reopened_date,
+          cmt.third_insufficiency_marks,
+          cmt.third_insuff_date,
+          cmt.third_insuff_reopened_date,
+          cmt.overall_status,
+          cmt.report_status
+        FROM \`client_applications\` ca
+        LEFT JOIN \`cmt_applications\` cmt ON ca.id = cmt.client_application_id
+        LEFT JOIN \`customers\` c ON c.id = ca.customer_id
+        LEFT JOIN \`branches\` b ON b.id = ca.branch_id
+        WHERE (ca.id = ? OR ca.application_id = ?)
+          AND ca.is_deleted != 1
+      `;
+
+      const params = [application_id_or_id, application_id_or_id];
+
+      if (branch_id) {
+        sql += ` AND ca.branch_id = ?`;
+        params.push(branch_id);
+      }
+
+      if (customer_id) {
+        sql += ` AND ca.customer_id = ?`;
+        params.push(customer_id);
+      }
+
+      sql += ` LIMIT 1`;
+
+      const results = await sequelize.query(sql, {
+        replacements: params,
+        type: QueryTypes.SELECT,
+      });
+
+      if (!results || results.length === 0) {
+        return callback(null, null);
+      }
+
+      return callback(null, results[0]);
+    } catch (err) {
+      console.error("Error in fetchInsufficiency model:", err);
+      return callback(err, null);
+    }
+  },
+
 };
 
 module.exports = clientApplication;

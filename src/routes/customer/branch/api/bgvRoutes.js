@@ -12,5 +12,11 @@ app.use(cors());
 router.put("/create", apiBgvController.submit);
 router.post("/upload", apiBgvController.upload);
 router.post("/fetch_report_status", apiBgvController.fetch_report_status);
+router.post("/fetch_insuff", apiBgvController.fetch_insufficiency);
+router.post("/fetch-insuff", apiBgvController.fetch_insufficiency);
+router.post("/fetch_insufficiency", apiBgvController.fetch_insufficiency);
+router.post("/fetch-insufficiency", apiBgvController.fetch_insufficiency);
+router.get("/fetch_insuff", apiBgvController.fetch_insufficiency);
+router.get("/fetch_insufficiency", apiBgvController.fetch_insufficiency);
 
 module.exports = router;

